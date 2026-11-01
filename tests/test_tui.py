@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from tui.app import ROOT, COMPONENTS, build_command, log_tail, read_events
+from tui.app import ROOT, COMPONENTS, DevboxTUI, build_command, log_tail, read_events
 
 
 class TUIBasicTests(unittest.TestCase):
@@ -20,6 +20,16 @@ class TUIBasicTests(unittest.TestCase):
         self.assertEqual(build_command("preflight", []), ["bash", str(ROOT / "setup-ubuntu.sh"), "--preflight"])
         self.assertEqual(build_command("upgrade", ["fzf"], dry_run=True), ["bash", str(ROOT / "setup-ubuntu.sh"), "--upgrade", "--dry-run", "--only", "fzf"])
         self.assertEqual(build_command("update", []), ["bash", str(ROOT / "bin" / "devbox"), "--update"])
+
+    def test_application_constructs_and_preview_toggle(self):
+        app = DevboxTUI()
+        self.assertFalse(app.dry_run)
+        self.assertFalse(app.busy)
+        app.toggle_dry_run()
+        self.assertTrue(app.dry_run)
+        self.assertEqual(app.preview_button.text, "Dry-run ON")
+        app.toggle_dry_run()
+        self.assertFalse(app.dry_run)
 
     def test_invalid_command_and_selection(self):
         for action, selected in [("delete", []), ("install", []), ("upgrade", ["not-a-tool"]), ("install", ["fzf; sudo reboot"])]:
