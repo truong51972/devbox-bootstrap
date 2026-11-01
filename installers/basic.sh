@@ -1,5 +1,3 @@
-#!/bin/bash
-
-sudo apt update && sudo apt upgrade -y
-sudo apt install build-essential -y
-sudo apt install -y make
+#!/usr/bin/env bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl wget git gnupg build-essential make

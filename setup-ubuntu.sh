@@ -1,65 +1,108 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-# If we are not running in a local repository directory, bootstrap automatically
-if [ ! -f "utils/utils.sh" ]; then
-    echo "=========================================================="
-    echo "  Ubuntu Setup: Bootstrapping from remote repository...   "
-    echo "=========================================================="
+usage() {
+    cat <<'HELP'
+Usage: bash setup-ubuntu.sh [--help]
+Interactive Ubuntu developer workstation bootstrap.
+Run as your regular user (not sudo); the installer requests sudo when needed.
+HELP
+}
 
-    # Ensure git is installed
-    if ! command -v git &> /dev/null; then
-        echo "Git is not installed. Installing git..."
-        sudo apt-get update && sudo apt-get install -y git
-    fi
+case "${1:-}" in
+    --help|-h) usage; exit 0 ;;
+    '') ;;
+    *) printf 'Unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+esac
 
-    # Create a temporary directory
-    TEMP_DIR=$(mktemp -d /tmp/setup-ubuntu.XXXXXX)
-
-    # Clone the repository
-    echo "Cloning setup repository..."
-    git clone --depth 1 https://github.com/truong51972/devbox-bootstrap.git "$TEMP_DIR"
-
-    # Run the setup script in the cloned directory
-    echo "Running setup script..."
-    cd "$TEMP_DIR"
-
-    # Use /dev/tty for stdin if available to allow interactive prompts
-    if [ -t 0 ] || [ -c /dev/tty ]; then
-        bash setup-ubuntu.sh "$@" < /dev/tty
-    else
-        bash setup-ubuntu.sh "$@"
-    fi
-
-    # Clean up the temporary directory
-    echo "Cleaning up temporary files..."
-    cd - > /dev/null
-    rm -rf "$TEMP_DIR"
-    exit 0
+if (( EUID == 0 )); then
+    echo 'Run as a regular user, not as root/sudo.' >&2
+    exit 1
 fi
 
-source utils/utils.sh
-
-source installers/basic.sh
-read -p "$(color_text "Install zsh and oh-my-zsh? (y/n): " "green")" install_zsh
-if [ "$install_zsh" = "y" ] || [ "$install_zsh" = "Y" ]; then
-    source installers/zsh.sh
-    source installers/powerlevel10k.sh
+# A pipe to Bash has no script path. Bootstrap from a temporary clone in that case.
+SCRIPT_DIR=''
+if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+    SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+fi
+if [[ -z "$SCRIPT_DIR" || ! -f "$SCRIPT_DIR/utils/utils.sh" ]]; then
+    command -v git >/dev/null || {
+        sudo apt-get update
+        sudo apt-get install -y git ca-certificates
+    }
+    temp_dir="$(mktemp -d /tmp/devbox-bootstrap.XXXXXX)"
+    trap 'rm -rf -- "$temp_dir"' EXIT
+    git clone --depth 1 https://github.com/truong51972/devbox-bootstrap.git "$temp_dir"
+    if [[ ! -r /dev/tty ]]; then
+        echo 'An interactive terminal is required. Clone the repo and run setup-ubuntu.sh directly.' >&2
+        exit 1
+    fi
+    bash "$temp_dir/setup-ubuntu.sh" < /dev/tty
+    exit $?
 fi
 
-source installers/keychain.sh
-source installers/python.sh
+# shellcheck source=utils/utils.sh
+source "$SCRIPT_DIR/utils/utils.sh"
+cd "$SCRIPT_DIR"
 
-read -p "$(color_text "Install docker? (y/n): " "green")" create_key
-if [ "$create_key" = "y" ] || [ "$create_key" = "Y" ]; then
-    source installers/docker.sh
+if [[ ! -r /etc/os-release ]]; then
+    die 'Cannot identify this Linux distribution.'
+    exit 1
+fi
+# shellcheck disable=SC1091
+source /etc/os-release
+if [[ "${ID:-}" != ubuntu ]]; then
+    die 'This installer currently supports Ubuntu only.'
+    exit 1
+fi
+if [[ ! -t 0 ]]; then
+    die 'Interactive input is required. Run in a terminal.'
+    exit 1
+fi
 
-    read -p "$(color_text "Install nvidia container toolkit? (y/n): " "green")" nvtoolkit
-    if [ "$nvtoolkit" = "y" ] || [ "$nvtoolkit" = "Y" ]; then
-        source installers/nvidia-container-toolkit.sh
+log 'Installing prerequisites (no automatic full-system upgrade).'
+# shellcheck source=installers/basic.sh
+source "$SCRIPT_DIR/installers/basic.sh"
+
+if confirm 'Install Zsh, Oh My Zsh and plugins?'; then
+    # shellcheck source=installers/zsh.sh
+    source "$SCRIPT_DIR/installers/zsh.sh"
+    export BOOTSTRAP_TARGET_SHELL=zsh
+    if confirm 'Install Powerlevel10k?'; then
+        # shellcheck source=installers/powerlevel10k.sh
+        source "$SCRIPT_DIR/installers/powerlevel10k.sh"
     fi
 fi
+if confirm 'Install uv (Python project and environment manager)?'; then
+    # shellcheck source=installers/python.sh
+    source "$SCRIPT_DIR/installers/python.sh"
+fi
+if confirm 'Configure SSH keychain?'; then
+    # shellcheck source=installers/keychain.sh
+    source "$SCRIPT_DIR/installers/keychain.sh"
+fi
+if confirm 'Install zoxide?'; then
+    # shellcheck source=installers/zoxide.sh
+    source "$SCRIPT_DIR/installers/zoxide.sh"
+fi
+if confirm 'Install Docker Engine?'; then
+    # shellcheck source=installers/docker.sh
+    source "$SCRIPT_DIR/installers/docker.sh"
+    if confirm 'Install and configure NVIDIA Container Toolkit for Docker?'; then
+        # shellcheck source=installers/nvidia-container-toolkit.sh
+        source "$SCRIPT_DIR/installers/nvidia-container-toolkit.sh"
+    fi
+fi
+if confirm 'Install kubectl (and optionally Minikube)?'; then
+    # shellcheck source=installers/k8s.sh
+    source "$SCRIPT_DIR/installers/k8s.sh"
+fi
+if confirm 'Run apt autoremove/autoclean?'; then
+    # shellcheck source=installers/clean.sh
+    source "$SCRIPT_DIR/installers/clean.sh"
+fi
 
-source installers/zoxide.sh
-source installers/k8s.sh
-
-source installers/clean.sh
+log 'Setup complete. Restart your shell to apply configuration changes.'
+if confirm 'Reboot now?'; then
+    sudo reboot
+fi

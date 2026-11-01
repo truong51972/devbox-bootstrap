@@ -1,9 +1,19 @@
-read -p "$(color_text "Create new SSH key for git? (y/n): " "green")" create_key
-if [ "$create_key" = "y" ] || [ "$create_key" = "Y" ]; then
-    ssh-keygen -t ed25519 -f ~/.ssh/git -N ""
+#!/usr/bin/env bash
+key_file=''
+if [[ -f "$HOME/.ssh/git" ]]; then
+    key_file="$HOME/.ssh/git"
+elif [[ -f "$HOME/.ssh/id_ed25519" ]]; then
+    key_file="$HOME/.ssh/id_ed25519"
+elif confirm 'Generate a new Ed25519 SSH key at ~/.ssh/git?'; then
+    mkdir -p -m 700 "$HOME/.ssh"
+    ssh-keygen -t ed25519 -f "$HOME/.ssh/git"
+    key_file="$HOME/.ssh/git"
 fi
-
-sudo apt-get install keychain -y
-TITLE="# Keychain setup"
-CONTENT='eval $(keychain --quiet --eval --agents ssh git)'
-append_if_not_exists_in_script "$TITLE" "$CONTENT"
+if [[ -z "$key_file" ]]; then
+    warn 'No SSH private key selected; skipping keychain.'
+else
+    sudo apt-get install -y keychain
+    key_ref="\$HOME/.ssh/${key_file##*/}"
+    append_if_not_exists_in_script '# Keychain setup' \
+        "eval \"\$(keychain --quiet --eval --agents ssh \"$key_ref\")\""
+fi
