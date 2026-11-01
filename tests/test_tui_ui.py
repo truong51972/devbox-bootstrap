@@ -119,7 +119,7 @@ class LayoutTests(unittest.TestCase):
                         pipe.send_text("\r")
                         await asyncio.sleep(0.10)
                         app.selector.current_values = ["uv"]
-                        app.selector.set_query("docker")
+                        app.selector.set_query("Docker Engine")
                         self.assertEqual([x.key for x in app.selector.visible], ["docker"])
                         pipe.send_text("a")
                         await asyncio.sleep(0.12)
