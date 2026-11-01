@@ -904,11 +904,21 @@ class DevboxTUI:
         for name, state in events:
             if name in self.status:
                 self.status[name] = state
-        self.status_view.text = self._render_status()
-        self.log_view.text = log_tail(
+        status_text = self._render_status()
+        log_text = log_tail(
             self.log_path, count=25 if self.expanded_log else 10
         )
-        self._invalidate()
+        # Rewriting a TextArea buffer on every 300ms poll resets selection
+        # and scroll position, even when there is no new event or log text.
+        changed = False
+        if self.status_view.text != status_text:
+            self.status_view.text = status_text
+            changed = True
+        if self.log_view.text != log_text:
+            self.log_view.text = log_text
+            changed = True
+        if changed:
+            self._invalidate()
 
     def _render_result(self) -> None:
         heading = "SUCCESS" if self.last_code == 0 else "FAILED"
