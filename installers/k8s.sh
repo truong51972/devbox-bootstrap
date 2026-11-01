@@ -19,6 +19,7 @@ if command -v kubectl >/dev/null 2>&1; then
 fi
 
 if [[ "$install_kubectl" == true ]]; then
+    sudo apt-get install -y curl ca-certificates
     architecture="$(dpkg --print-architecture)"
     case "$architecture" in
         amd64|arm64) ;;
