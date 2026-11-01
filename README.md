@@ -24,7 +24,7 @@ Requires Ubuntu, Bash, an interactive terminal, network access, and `sudo` privi
 - Optional: Zsh + Oh My Zsh, syntax highlighting, autosuggestions, Powerlevel10k; uv; SSH keychain; zoxide; **fzf, ripgrep, bat + fd, direnv**; Docker Engine; NVIDIA Container Toolkit; kubectl; and Minikube.
 - Optional at the end: apt cleanup and reboot.
 
-Each optional component is prompted separately and defaults to **No**. Powerlevel10k is offered after installing Zsh; NVIDIA Container Toolkit is offered after Docker Engine. Configuration is written to the selected shell (`~/.zshrc` or `~/.bashrc`). The installer preserves an existing `~/.p10k.zsh` instead of overwriting it, and avoids repeating marked configuration blocks.
+Each optional component is prompted separately and defaults to **No**. Powerlevel10k is offered only when Zsh is available; NVIDIA Toolkit only when Docker is available. Minikube is a separate optional installer. Configuration is written to the selected shell (`~/.zshrc` or `~/.bashrc`). The installer preserves an existing `~/.p10k.zsh` instead of overwriting it, and avoids repeating marked configuration blocks.
 
 ## CLI tools
 
@@ -47,6 +47,7 @@ NVIDIA, free disk space and installed CLIs) and targeted non-interactive install
 
 ```bash
 bash setup-ubuntu.sh --preflight
+bash setup-ubuntu.sh --doctor
 bash setup-ubuntu.sh --dry-run --only fzf,ripgrep,bat-fd,direnv
 bash setup-ubuntu.sh --only fzf,ripgrep,bat-fd,direnv
 bash setup-ubuntu.sh --only kubectl --kubectl-version v1.35.1
@@ -54,19 +55,19 @@ bash setup-ubuntu.sh --only kubectl --kubectl-version v1.35.1
 
 Without `--only`, optional components are prompted interactively and the basic
 prerequisite packages are installed. With `--only`, **only the selected installers**
-run (plus normal APT dependencies), without unrelated package upgrades.
+run (plus normal APT dependencies), without unrelated package upgrades. `--only` skips component-selection prompts but `sudo` may still require authentication. Other optional confirmations are skipped or rejected without a terminal.
 `--dry-run` prints planned components and never executes installers;
-`--preflight` only inspects the environment. Use `--help` for the full list.
+`--preflight` only inspects the environment. `--doctor` checks configured shell hooks, Docker daemon, Compose and NVIDIA runtime without installing anything or pulling container images. Use `--help` for the full list.
 
 Shell configuration changes to existing `~/.zshrc` or `~/.bashrc` create a
 timestamped `.devbox-backup-YYYYMMDD-HHMMSS` copy before the first change in
-each run. The installer preserves legacy configuration blocks and warns about
+each run. Zsh configuration respects `$ZDOTDIR` when provided. The installer preserves legacy configuration blocks and warns about
 known obsolete aliases/auto-cd blocks; it **does not delete or migrate user edits**.
 
 Every selected installer performs a lightweight post-install check for its binary
 or expected artifact. This does **not** replace an end-to-end runtime test:
 Docker daemon/GPU availability and Kubernetes cluster connectivity must be tested
-separately.
+separately. The final summary distinguishes `INSTALLED`, `CONFIGURED`, `SKIPPED` and `FAILED`. Minikube downloads are SHA-256 verified.
 
 ## Validation
 
