@@ -12,15 +12,24 @@ printf '%s\n' "$*" >> "$MOCK_LOG"
 MOCK
 cat > "$temp/bin/curl" <<'MOCK'
 #!/usr/bin/env bash
-url='' dest=''
+url='' dest='' retry=0 retry_delay=0 all_errors=0
 while (( $# )); do
     case "$1" in
+        --retry) [[ "$2" == 3 ]] || exit 6; retry=1; shift 2 ;;
+        --retry-delay) [[ "$2" == 2 ]] || exit 6; retry_delay=1; shift 2 ;;
+        --retry-all-errors) all_errors=1; shift ;;
         -o) dest="$2"; shift 2 ;;
         https://*) url="$1"; shift ;;
         *) shift ;;
     esac
 done
-[[ -n "$url" && -n "$dest" ]] || exit 5
+[[ -n "$url" && "$retry" == 1 && "$retry_delay" == 1 && "$all_errors" == 1 ]] || exit 5
+if [[ "$url" == 'https://api.github.com/repos/kubernetes/minikube/releases/latest' ]]; then
+    [[ -z "$dest" ]] || exit 7
+    printf '{"tag_name":"v1.42.0"}\n'
+    exit 0
+fi
+[[ -n "$dest" ]] || exit 5
 if [[ "$url" == *.sha256 ]]; then
     if [[ "${MOCK_BAD_CHECKSUM:-0}" == 1 ]]; then
         printf '%s\n' "$(printf wrong | sha256sum | cut -d' ' -f1)" > "$dest"
@@ -37,6 +46,10 @@ export PATH="$temp/bin:$PATH"
 source "$repo_dir/utils/utils.sh"
 # shellcheck source=utils/upgrade.sh
 source "$repo_dir/utils/upgrade.sh"
+
+# The same retry policy must apply to GitHub release metadata and binary assets.
+response="$(upgrade_fetch --max-time 30 https://api.github.com/repos/kubernetes/minikube/releases/latest)"
+[[ "$response" == '{"tag_name":"v1.42.0"}' ]]
 
 # Redirect command -v for the managed binary to avoid touching the CI machine.
 command() {
