@@ -43,7 +43,10 @@ while (( $# > 0 )); do
             fi
             if [[ "$key" == --only ]]; then ONLY_COMPONENTS="$2"; else BOOTSTRAP_KUBECTL_VERSION="$2"; fi
             shift 2 ;;
-        --only=*) ONLY_COMPONENTS="${1#--only=}"; shift ;;
+        --only=*)
+            ONLY_COMPONENTS="${1#--only=}"
+            [[ -n "$ONLY_COMPONENTS" ]] || { echo '--only requires at least one component.' >&2; exit 2; }
+            shift ;;
         --kubectl-version=*) BOOTSTRAP_KUBECTL_VERSION="${1#--kubectl-version=}"; shift ;;
         *) printf 'Unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
     esac
@@ -86,10 +89,14 @@ if [[ -z "$SCRIPT_DIR" || ! -f "$SCRIPT_DIR/utils/utils.sh" ]]; then
     temp_dir="$(mktemp -d /tmp/devbox-bootstrap.XXXXXX)"
     trap 'rm -rf -- "$temp_dir"' EXIT
     git clone --depth 1 https://github.com/truong51972/devbox-bootstrap.git "$temp_dir"
-    if [[ -t 0 ]]; then
+    if [[ -t 0 || -n "$ONLY_COMPONENTS" ]] || (( PREFLIGHT_ONLY )); then
+        # Targeted/preflight modes do not require a terminal for component selection.
         bash "$temp_dir/setup-ubuntu.sh" "${original_args[@]}"
-    else
+    elif [[ -r /dev/tty ]]; then
         bash "$temp_dir/setup-ubuntu.sh" "${original_args[@]}" < /dev/tty
+    else
+        echo 'An interactive terminal is required. Run locally or use --only.' >&2
+        exit 1
     fi
     exit $?
 fi
@@ -137,22 +144,26 @@ verify_binary() {
 verify_component() {
     local component="$1"
     case "$component" in
-        zsh) verify_binary "$component" zsh ;;
-        powerlevel10k) [[ -f "$HOME/powerlevel10k/powerlevel10k.zsh-theme" ]] || die 'Powerlevel10k theme not found.' ;;
-        uv) verify_binary "$component" uv ;;
+        zsh) verify_binary "$component" zsh || return 1 ;;
+        powerlevel10k)
+            [[ -f "$HOME/powerlevel10k/powerlevel10k.zsh-theme" ]] || {
+                die 'Powerlevel10k theme not found.'
+                return 1
+            } ;;
+        uv) verify_binary "$component" uv || return 1 ;;
         keychain) verify_binary "$component" keychain || return 1 ;;
-        zoxide) verify_binary "$component" zoxide ;;
-        fzf) verify_binary "$component" fzf ;;
-        ripgrep) verify_binary "$component" rg ;;
+        zoxide) verify_binary "$component" zoxide || return 1 ;;
+        fzf) verify_binary "$component" fzf || return 1 ;;
+        ripgrep) verify_binary "$component" rg || return 1 ;;
         bat-fd)
-            verify_binary "$component" bat batcat
-            verify_binary "$component" fd fdfind ;;
-        direnv) verify_binary "$component" direnv ;;
-        docker) verify_binary "$component" docker ;;
-        nvidia) verify_binary "$component" nvidia-ctk ;;
-        kubectl) verify_binary "$component" kubectl ;;
+            verify_binary "$component" bat batcat || return 1
+            verify_binary "$component" fd fdfind || return 1 ;;
+        direnv) verify_binary "$component" direnv || return 1 ;;
+        docker) verify_binary "$component" docker || return 1 ;;
+        nvidia) verify_binary "$component" nvidia-ctk || return 1 ;;
+        kubectl) verify_binary "$component" kubectl || return 1 ;;
         clean) return 0 ;;
-        *) die "Internal error: unknown component $component" ;;
+        *) die "Internal error: unknown component $component"; return 1 ;;
     esac
     log "Verified: $component"
 }
