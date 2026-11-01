@@ -21,3 +21,4 @@ jobs:
           bash tests/cli.sh
           bash tests/config.sh
           bash tests/docker.sh
+          bash tests/hardening.sh
