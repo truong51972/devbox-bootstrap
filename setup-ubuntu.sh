@@ -227,6 +227,7 @@ finish_bootstrap() {
     local result="$1"
     if (( result != 0 )) && [[ -n "$CURRENT_COMPONENT" ]]; then
         COMPONENT_STATUS["$CURRENT_COMPONENT"]=FAILED
+        devbox_event "$CURRENT_COMPONENT" FAILED
     fi
     print_summary
 }
@@ -242,6 +243,8 @@ run_component() {
                 if ! command -v zsh >/dev/null 2>&1; then
                     warn 'Skipping Powerlevel10k: Zsh is not installed.'
                     COMPONENT_STATUS["$component"]=SKIPPED
+            devbox_event "$component" SKIPPED
+                    devbox_event "$component" SKIPPED
                     COMPONENT_ORDER+=("$component")
                     return 0
                 fi ;;
@@ -249,12 +252,15 @@ run_component() {
                 if ! command -v docker >/dev/null 2>&1; then
                     warn 'Skipping NVIDIA Toolkit: Docker is not installed.'
                     COMPONENT_STATUS["$component"]=SKIPPED
+            devbox_event "$component" SKIPPED
+                    devbox_event "$component" SKIPPED
                     COMPONENT_ORDER+=("$component")
                     return 0
                 fi ;;
         esac
         if ! confirm "$prompt"; then
             COMPONENT_STATUS["$component"]=SKIPPED
+            devbox_event "$component" SKIPPED
             COMPONENT_ORDER+=("$component")
             return 0
         fi
@@ -264,11 +270,13 @@ run_component() {
     if (( BOOTSTRAP_DRY_RUN )); then
         log "[dry-run] Would run: installers/$installer"
         COMPONENT_STATUS["$component"]=PLANNED
+        devbox_event "$component" PLANNED
         return 0
     fi
 
     CURRENT_COMPONENT="$component"
     COMPONENT_STATUS["$component"]=FAILED
+    devbox_event "$component" RUNNING
     DEVBOX_COMPONENT_CONFIG_SKIPPED=0
     log "Installing: $component"
     # Do not put source in an if/! condition: it would disable errexit in installers.
@@ -289,6 +297,7 @@ run_component() {
     if [[ "$component" == zsh && "${COMPONENT_STATUS[$component]}" == CONFIGURED ]]; then
         export BOOTSTRAP_TARGET_SHELL=zsh
     fi
+    devbox_event "$component" "${COMPONENT_STATUS[$component]}"
     CURRENT_COMPONENT=''
 }
 

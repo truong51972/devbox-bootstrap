@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+# Structured events for the TUI, separate from verbose installer output.
+devbox_event() {
+    [[ -n "${DEVBOX_EVENT_FILE:-}" ]] || return 0
+    printf 'STATUS\t%s\t%s\n' "$1" "$2" >> "$DEVBOX_EVENT_FILE" || true
+}
+
 log() { printf '[devbox] %s\n' "$*"; }
 warn() { printf '[devbox] WARNING: %s\n' "$*" >&2; }
 die() { printf '[devbox] ERROR: %s\n' "$*" >&2; return 1; }

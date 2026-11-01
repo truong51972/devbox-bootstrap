@@ -14,6 +14,7 @@ upgrade_exit() {
     local result="$1" component
     if (( result != 0 )) && [[ -n "$UPGRADE_ACTIVE" ]]; then
         UPGRADE_STATUS["$UPGRADE_ACTIVE"]=FAILED
+        devbox_event "$UPGRADE_ACTIVE" FAILED
     fi
     if (( ${#UPGRADE_ORDER[@]} > 0 )); then
         printf '\n[devbox] Upgrade summary:\n'
@@ -243,6 +244,7 @@ upgrade_component() {
     UPGRADE_ACTIVE="$component"
     UPGRADE_ORDER+=("$component")
     UPGRADE_STATUS["$component"]=FAILED
+    devbox_event "$component" RUNNING
     case "$component" in
         zsh)
             upgrade_apt zsh
@@ -279,6 +281,7 @@ upgrade_component() {
     else
         UPGRADE_STATUS["$component"]=SKIPPED
     fi
+    devbox_event "$component" "${UPGRADE_STATUS[$component]}"
     UPGRADE_ACTIVE=''
 }
 
