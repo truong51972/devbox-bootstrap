@@ -4,17 +4,22 @@ A small, interactive bootstrap for **Ubuntu** developer machines and Ubuntu on W
 
 ## Recommended: install the interactive TUI
 
-On Ubuntu/WSL, ensure Git, Python and the Python venv module are available:
+Install with one command (Git is required to fetch the repository):
 
 ```bash
-sudo apt-get install -y git python3 python3-venv
 curl -fsSL https://raw.githubusercontent.com/truong51972/devbox-bootstrap/main/install-devbox.sh | bash
 ```
 
-This checks out Devbox into `~/.local/share/devbox-bootstrap`, creates an isolated
-`.venv` using Python's built-in `venv` module and installs only
-`prompt_toolkit` and its small dependencies. It links the launcher at
-`~/.local/bin/devbox`; no global Python packages or `pip3` are required.
+The launcher detects the available runtime in this order:
+
+1. **uv available:** create `.venv` via `uv venv` and install TUI dependencies with `uv pip install`. uv can also download a managed Python interpreter if the system does not have one.
+2. **No uv:** use an existing `python3` with `venv` and the virtual environment's `pip`.
+3. **Neither works:** stop with a clear error and installation advice. Devbox does not automatically invoke APT to install Python.
+
+`uv` is the preferred, optional runtime manager. Dependencies are recorded once in `tui/requirements.txt` for **both** uv and pip, with no global Python packages installed. The isolated environment lives at `~/.local/share/devbox-bootstrap/.venv`; the command symlink is `~/.local/bin/devbox`.
+
+If a prerequisite is missing, install `uv` (recommended) or `python3 python3-venv` manually.
+
 
 ```bash
 devbox                  # Open the interactive terminal UI

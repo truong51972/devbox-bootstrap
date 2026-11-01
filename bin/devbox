@@ -7,22 +7,47 @@ venv="$root/.venv"
 upstream='https://github.com/truong51972/devbox-bootstrap.git'
 
 setup_runtime() {
+    local python="$venv/bin/python" requirements="$root/tui/requirements.txt"
+
+    if command -v uv >/dev/null 2>&1; then
+        # uv can find Python or download a managed interpreter if absent.
+        echo '[devbox] Using uv for the isolated TUI environment.'
+        if [[ ! -x "$python" ]]; then
+            if ! uv venv "$venv"; then
+                echo '[devbox] Could not create the virtual environment using uv.' >&2
+                return 1
+            fi
+        fi
+        if [[ ! -x "$python" ]]; then
+            echo "[devbox] uv did not create a usable interpreter: $python" >&2
+            return 1
+        fi
+        uv pip install --python "$python" -r "$requirements"
+        return $?
+    fi
+
     if ! command -v python3 >/dev/null 2>&1; then
-        echo 'Missing Python 3. On Ubuntu: sudo apt-get install -y python3 python3-venv' >&2
+        echo '[devbox] No uv or python3 available. Install uv (recommended), or Python 3 with venv support.' >&2
         return 1
     fi
-    if [[ ! -x "$venv/bin/python" ]]; then
+
+    echo '[devbox] uv not found; using python3 + venv.'
+    if [[ ! -x "$python" ]]; then
         if ! python3 -m venv "$venv"; then
-            echo 'Could not create a venv. On Ubuntu: sudo apt-get install -y python3-venv' >&2
+            echo '[devbox] Python venv is unavailable. Install python3-venv, or install uv instead.' >&2
             return 1
         fi
     fi
-    if [[ ! -x "$venv/bin/python" ]]; then
-        echo "Virtual environment is incomplete: $venv" >&2
+    if [[ ! -x "$python" ]]; then
+        echo "[devbox] Virtual environment is incomplete: $venv" >&2
         return 1
     fi
-    "$venv/bin/python" -m pip install --disable-pip-version-check --no-input \
-        -r "$root/tui/requirements.txt"
+    if ! "$python" -m pip --version >/dev/null 2>&1; then
+        echo '[devbox] pip is missing inside the virtual environment. Repair Python venv/ensurepip or install uv.' >&2
+        return 1
+    fi
+    "$python" -m pip install --disable-pip-version-check --no-input \
+        -r "$requirements"
 }
 
 update_code() {
@@ -62,7 +87,7 @@ case "${1:-}" in
 Usage: devbox [OPTION]
   (no args)        Launch interactive TUI
   --update         Pull latest Devbox source from GitHub (fast-forward only)
-  --setup-runtime  Create/update the isolated Python venv
+  --setup-runtime  Create/update isolated venv (uv first; Python fallback)
   --version        Show installed Devbox Git revision
   --doctor         Run read-only diagnostics via the Bash backend
   --preflight      Inspect host environment

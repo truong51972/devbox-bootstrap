@@ -7,12 +7,11 @@ if (( EUID == 0 )); then
     exit 1
 fi
 
-for executable in git python3; do
-    if ! command -v "$executable" >/dev/null 2>&1; then
-        echo "Missing $executable. On Ubuntu: sudo apt-get install -y git python3 python3-venv" >&2
-        exit 1
-    fi
-done
+# Git is required for source checkout; runtime discovery is in bin/devbox.
+if ! command -v git >/dev/null 2>&1; then
+    echo 'Git is required to fetch Devbox (Ubuntu: sudo apt-get install git).' >&2
+    exit 1
+fi
 
 app_dir="$HOME/.local/share/devbox-bootstrap"
 bin_dir="$HOME/.local/bin"
