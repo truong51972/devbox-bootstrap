@@ -37,4 +37,9 @@ fi
 [[ "$output" == *'Devbox Health Check'* ]]
 [[ "$output" == *'daemon unreachable'* ]]
 
+# Minikube is an independent component; it must not select kubectl.
+output="$(bash "$repo_dir/setup-ubuntu.sh" --dry-run --only minikube)"
+[[ "$output" == *'installers/minikube.sh'* ]]
+[[ "$output" != *'installers/k8s.sh'* ]]
+
 printf 'CLI tests passed.\n'
