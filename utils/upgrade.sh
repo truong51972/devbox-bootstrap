@@ -37,10 +37,17 @@ upgrade_apt() {
             continue
         fi
         if (( ! UPGRADE_APT_REFRESHED )); then
-            sudo apt-get update
+            if ! sudo apt-get update; then
+                die 'APT index refresh failed; check your configured APT repositories.'
+                return 1
+            fi
             UPGRADE_APT_REFRESHED=1
         fi
-        installed="$(dpkg-query -W -f='${Version}' "$package")"
+        if ! installed="$(dpkg-query -W -f='${Version}' "$package")"; then
+            warn "Could not read installed version for $package; skipping it."
+            UPGRADE_BLOCKED=1
+            continue
+        fi
         # Consume the complete apt-cache output. Exiting awk early can SIGPIPE
         # apt-cache and abort this function under 'set -o pipefail'.
         if ! policy="$(apt-cache policy "$package")"; then
