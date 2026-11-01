@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-sudo apt-get install -y zsh
+sudo apt-get install -y zsh git curl ca-certificates
 if [[ ! -f "$HOME/.oh-my-zsh/oh-my-zsh.sh" ]]; then
     log 'Installing Oh My Zsh.'
     ( set -Eeuo pipefail
