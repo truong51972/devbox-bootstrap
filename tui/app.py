@@ -163,6 +163,11 @@ class DevboxTUI:
         def _quit(_event):
             self.quit()
 
+        @kb.add("?")
+        def _help(_event):
+            if self.screen != "help":
+                self._show_help()
+
         if result:
             @kb.add("enter")
             def _home(_event):
