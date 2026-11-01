@@ -165,7 +165,8 @@ class KeyboardList:
         if multiple:
             @kb.add("a")
             def _all(_event) -> None:
-                self.selected = {item.key for item in self.visible}
+                # Preserve selected items hidden by an active filter.
+                self.selected.update(item.key for item in self.visible)
                 self.on_change()
 
             @kb.add("n")
@@ -266,7 +267,7 @@ class KeyboardList:
         fragments: list[tuple[str, str]] = []
         values = self.visible
         if not values:
-            return [("class:muted", "  No matching components. Clear the filter with Esc.")]
+            return [("class:muted", "  No matching entries. Press / to edit the filter.")]
         last_group = None
         wide = self.get_columns() >= 105
         for i, entry in enumerate(values):
