@@ -22,4 +22,19 @@ if bash "$repo_dir/setup-ubuntu.sh" --only kubectl --kubectl-version fake >/dev/
 fi
 output="$(bash "$repo_dir/setup-ubuntu.sh" --dry-run --only kubectl --kubectl-version v1.35.1)"
 [[ "$output" == *'installers/k8s.sh'* ]]
+# --doctor is read-only and detects an installed but unreachable Docker daemon.
+temp_bin="$(mktemp -d)"
+trap 'rm -rf -- "$temp_bin"' EXIT
+cat > "$temp_bin/docker" <<'MOCK'
+#!/usr/bin/env bash
+exit 1
+MOCK
+chmod +x "$temp_bin/docker"
+if output="$(PATH="$temp_bin:$PATH" bash "$repo_dir/setup-ubuntu.sh" --doctor 2>&1)"; then
+    echo 'Doctor incorrectly accepted an unreachable Docker daemon' >&2
+    exit 1
+fi
+[[ "$output" == *'Devbox Health Check'* ]]
+[[ "$output" == *'daemon unreachable'* ]]
+
 printf 'CLI tests passed.\n'
