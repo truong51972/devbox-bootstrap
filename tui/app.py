@@ -85,6 +85,7 @@ COMPONENT SELECTION
   Space              Toggle highlighted component
   a / n              Select visible / clear all
   /                  Filter by tool or group
+  i                  Show full component details
   Esc (in filter)    Clear filter and return to list
 
 CONFIRMATION
@@ -125,6 +126,7 @@ class DevboxTUI:
         self.last_result = ""
         self.run_task: asyncio.Task[None] | None = None
         self.filter_active = False
+        self.expanded_log = False
         self._search_text = ""
 
         self.menu = self._make_menu()
@@ -151,6 +153,10 @@ class DevboxTUI:
             text=HELP, read_only=True, focusable=True, scrollbar=True,
             wrap_lines=False,
         )
+        self.info_view = TextArea(
+            text="", read_only=True, focusable=True, scrollbar=True,
+            wrap_lines=True,
+        )
         self.filter_input = TextArea(
             text="", multiline=False, prompt=" / Filter: ",
             accept_handler=lambda _buffer: self._finish_filter(),
@@ -161,6 +167,7 @@ class DevboxTUI:
         self._bind_text(self.results_view, result=True)
         self._bind_text(self.history_view, log_viewer=True)
         self._bind_text(self.help_view)
+        self._bind_text(self.info_view)
         self._bind_filter()
 
         self.views: dict[str, object] = {}
@@ -219,6 +226,7 @@ class DevboxTUI:
             on_help=self._show_help,
             on_change=self._invalidate,
             on_filter=self._begin_filter,
+            on_details=self._show_component_info,
             get_columns=self.columns,
         )
 
@@ -288,21 +296,15 @@ class DevboxTUI:
                 DynamicContainer(self._selection_layout),
                 DynamicContainer(lambda: self._filter_layout()),
             ]),
-            "↑↓ Move   Space Toggle   a All   n None   / Filter   Enter Continue   Esc Back",
+            "↑↓ Move   Space Select   a All   n None   / Filter   i Info   Enter Next   Esc Back",
         )
         self.views["confirm"] = self._page(
             "Confirm", DynamicContainer(self._confirm_layout),
             "Space Toggle options   d Dry-run   Enter Execute   Esc Back",
         )
         self.views["run"] = self._page(
-            "Execution", HSplit([
-                self._text(self._progress_tokens, height=2),
-                self.status_view,
-                self._divider(),
-                self._text(lambda: [("class:section", "  RECENT OUTPUT")], height=1),
-                self.log_view,
-            ]),
-            "Task active · log persisted to disk · exit locked",
+            "Execution", DynamicContainer(self._run_layout),
+            "l Expand/collapse output   Task active · exit locked",
         )
         self.views["result"] = self._page(
             "Result", self.results_view,
@@ -318,6 +320,10 @@ class DevboxTUI:
         )
         self.views["help"] = self._page(
             "Keyboard help", self.help_view, "Esc Back",
+        )
+        self.views["info"] = self._page(
+            "Component details", self.info_view,
+            "Esc Back to components",
         )
 
     def _home_layout(self):
@@ -370,6 +376,23 @@ class DevboxTUI:
                 ("", "\n"),
             ], height=2),
             self.options.window,
+        ])
+
+    def _run_layout(self):
+        if self.expanded_log:
+            return HSplit([
+                self._text(self._progress_tokens, height=2),
+                self.status_view,
+                self._divider(),
+                self._text(lambda: [("class:section", "  EXPANDED OUTPUT")], height=1),
+                self.log_view,
+            ])
+        return HSplit([
+            self._text(self._progress_tokens, height=2),
+            self.status_view,
+            self._divider(),
+            self._text(lambda: [("class:section", "  RECENT OUTPUT")], height=1),
+            self.log_view,
         ])
 
     def _logs_layout(self):
@@ -464,6 +487,10 @@ class DevboxTUI:
             ("class:muted", "  Enter to open this log."),
         ]
 
+    def _show_component_info(self) -> None:
+        self.info_view.text = "".join(text for _style, text in self._component_details())
+        self.navigate("info", self.info_view)
+
     def _begin_filter(self) -> None:
         self.filter_active = True
         self.app.layout.focus(self.filter_input)
@@ -512,6 +539,15 @@ class DevboxTUI:
         def _help(_event):
             if self.screen != "help":
                 self._show_help()
+
+        if widget is self.status_view:
+            @kb.add("l")
+            def _expand(_event):
+                self.expanded_log = not self.expanded_log
+                self.log_view.text = log_tail(
+                    self.log_path, count=25 if self.expanded_log else 10
+                )
+                self._invalidate()
 
         if result:
             @kb.add("enter")
@@ -661,6 +697,7 @@ class DevboxTUI:
         self.event_offset = 0
         self.last_code = None
         self.last_result = "Preparing..."
+        self.expanded_log = False
         self.status_view.text = self._render_status()
         self.log_view.text = "Preparing job..."
         self._notice(f"Starting {action}...")
@@ -780,7 +817,9 @@ class DevboxTUI:
             if name in self.status:
                 self.status[name] = state
         self.status_view.text = self._render_status()
-        self.log_view.text = log_tail(self.log_path, count=10)
+        self.log_view.text = log_tail(
+            self.log_path, count=25 if self.expanded_log else 10
+        )
         self._invalidate()
 
     def _render_result(self) -> None:
@@ -845,6 +884,8 @@ class DevboxTUI:
             self.navigate(target, self._focus_for(target))
         elif self.screen == "confirm":
             self.navigate("select", self.selector.window) if self.action != "update" else self.navigate("home", self.menu.window)
+        elif self.screen == "info":
+            self.navigate("select", self.selector.window)
         elif self.screen == "select" and self.filter_active:
             self._cancel_filter()
         elif self.screen in ("select", "result", "logs"):
@@ -855,7 +896,7 @@ class DevboxTUI:
             "home": self.menu.window, "select": self.selector.window,
             "confirm": self.options.window, "result": self.results_view,
             "logs": self.log_files.window, "view_log": self.history_view,
-            "run": self.status_view,
+            "run": self.status_view, "info": self.info_view,
         }.get(screen, self.help_view)
 
     def quit(self) -> None:
