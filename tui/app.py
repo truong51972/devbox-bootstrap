@@ -574,8 +574,15 @@ class DevboxTUI:
 
     def _finish_filter(self) -> bool:
         self.filter_active = False
-        self.app.layout.focus(self._active_list().window)
-        self._notice("Filtered list. Esc returns to the previous screen.")
+        active = self._active_list()
+        self.app.layout.focus(active.window)
+        if active.query:
+            self._notice(
+                f"Filter: {active.query!r} ({len(active.visible)} results). "
+                "Esc clears filter; / edits."
+            )
+        else:
+            self._notice("Filter cleared. Esc returns to the main menu.")
         return True
 
     def _cancel_filter(self) -> None:
@@ -989,6 +996,10 @@ class DevboxTUI:
             self.navigate("select", self.selector.window)
         elif self.screen in ("select", "logs") and self.filter_active:
             self._cancel_filter()
+        elif self.screen in ("select", "logs") and self._active_list().query:
+            self.filter_input.text = ""
+            self._active_list().set_query("")
+            self._notice("Filter cleared. Press Esc again to return.")
         elif self.screen in ("select", "result", "logs"):
             self.navigate("home", self.menu.window)
 
