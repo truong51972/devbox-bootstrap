@@ -153,12 +153,12 @@ upgrade_binary() {
     # Trap local downloads in a subprocess while keeping status in the caller.
     (
         set -Eeuo pipefail
-        trap 'rm -rf -- "$1"' EXIT
+        trap 'rm -rf -- "$dir"' EXIT
         curl -fsSL "$url" -o "$dir/$name"
         curl -fsSL "${url}.sha256" -o "$dir/$name.sha256"
         printf '%s  %s\n' "$(cat "$dir/$name.sha256")" "$dir/$name" | sha256sum --check --status
         sudo install -o root -g root -m 0755 "$dir/$name" "/usr/local/bin/$name"
-    ) "$dir"
+    )
     UPGRADE_CHANGED=1
 }
 
