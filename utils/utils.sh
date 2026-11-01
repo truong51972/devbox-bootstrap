@@ -14,9 +14,13 @@ confirm() {
     [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
 
+zsh_rc_file() {
+    printf '%s\n' "${ZDOTDIR:-$HOME}/.zshrc"
+}
+
 shell_rc_file() {
     case "${BOOTSTRAP_TARGET_SHELL:-${SHELL##*/}}" in
-        zsh) printf '%s\n' "$HOME/.zshrc" ;;
+        zsh) zsh_rc_file ;;
         bash) printf '%s\n' "$HOME/.bashrc" ;;
         *) die 'Only Bash and Zsh shell configuration is supported.' ;;
     esac
@@ -42,7 +46,7 @@ backup_shell_file() {
 
 warn_legacy_shell_config() {
     local file
-    for file in "$HOME/.zshrc" "$HOME/.bashrc"; do
+    for file in "$(zsh_rc_file)" "$HOME/.bashrc"; do
         [[ -f "$file" ]] || continue
         if grep -Eq '^# (Alias for uv python|Auto change to the last working directory on shell startup)$' "$file"; then
             warn "Legacy bootstrap blocks detected in $file; review old aliases or auto-cd manually."
@@ -77,26 +81,44 @@ append_if_not_exists_in_script() {
     printf '\n%s\n%s\n' "$marker" "$content" >> "$file"
 }
 
-# Works with either a one-line or multiline Oh My Zsh plugins=(...) declaration.
+# Edit the active Zsh rc (ZDOTDIR-aware) without mistaking commented plugins
+# for enabled entries. Keep the original layout and create a backup first.
 add_plugin_if_not_exists() {
-    local plugin="$1" file="$HOME/.zshrc" block temp
+    local plugin="$1" file status temp
+    file="$(zsh_rc_file)" || return 1
     [[ "$plugin" =~ ^[a-zA-Z0-9_-]+$ ]] || { die "Invalid plugin name: $plugin"; return 1; }
     [[ -f "$file" ]] || { die "Missing $file (install Oh My Zsh first)"; return 1; }
 
-    block="$(awk '
-        /^[[:space:]]*plugins=\(/ { active=1 }
-        active { print; if (index($0, ")")) exit }
-    ' "$file")"
-    [[ -n "$block" && "$block" == *')'* ]] || { die "Cannot locate plugins=(...) in $file"; return 1; }
-    if printf '%s\n' "$block" | grep -Eq "(^|[[:space:]]|\\()${plugin}($|[[:space:]]|\\))"; then
-        return 0
+    status=0
+    awk -v target="$plugin" '
+        function strip_comment(s) { sub(/#.*/, "", s); return s }
+        /^[[:space:]]*plugins[[:space:]]*=\(/ && !seen { seen=1; active=1 }
+        active {
+            line=strip_comment($0)
+            if (index(line, ")")) closed=1
+            gsub(/[()]/, " ", line)
+            gsub(/plugins[[:space:]]*=/, " ", line)
+            count=split(line, words, /[[:space:]]+/)
+            for (i=1; i<=count; i++) if (words[i]==target) present=1
+            if (closed) active=0
+        }
+        END {
+            if (!seen || !closed) exit 2
+            exit present ? 0 : 1
+        }
+    ' "$file" || status=$?
+    if (( status == 0 )); then return 0; fi
+    if (( status != 1 )); then
+        die "Malformed or missing plugins=(...) declaration in $file"
+        return 1
     fi
 
     backup_shell_file "$file" || return 1
     temp="$(mktemp "${file}.XXXXXX")" || return 1
     if ! awk -v plugin="$plugin" '
-        !done && /^[[:space:]]*plugins=\(/ { active=1 }
-        active && index($0, ")") {
+        function strip_comment(s) { sub(/#.*/, "", s); return s }
+        !done && /^[[:space:]]*plugins[[:space:]]*=\(/ { active=1 }
+        active && index(strip_comment($0), ")") {
             if ($0 ~ /^[[:space:]]*\)/) print "  " plugin
             else sub(/\)/, " " plugin ")")
             done=1; active=0
