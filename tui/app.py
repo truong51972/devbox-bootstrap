@@ -134,6 +134,7 @@ class DevboxTUI:
         self.last_result = ""
         self.run_task: asyncio.Task[None] | None = None
         self.filter_active = False
+        self._layout_cache: dict[str, object] = {}
         self.theme = os.environ.get("DEVBOX_THEME", "minimal").lower()
         if self.theme not in THEMES:
             self.theme = "minimal"
@@ -387,49 +388,50 @@ class DevboxTUI:
             "Esc Back to components",
         )
 
-    def _home_layout(self):
-        if self.columns() >= 94:
-            return VSplit([
-                self.menu.window,
-                self._divider_v(),
-                self._text(self._home_details),
-            ], padding=2)
-        if self.rows() >= 26:
-            return HSplit([
-                self.menu.window,
-                self._divider(),
-                self._text(self._home_details, height=5),
-            ])
-        return self.menu.window
+    def _layout(self, key: str, build):
+        """Keep Window/HSplit instances stable across prompt_toolkit redraws."""
+        if key not in self._layout_cache:
+            self._layout_cache[key] = build()
+        return self._layout_cache[key]
 
     def _divider_v(self):
         return Window(char="│", width=1, style="class:divider")
 
+    def _home_layout(self):
+        if self.columns() >= 94:
+            return self._layout("home-wide", lambda: VSplit([
+                self.menu.window, self._divider_v(),
+                self._text(self._home_details),
+            ], padding=2))
+        if self.rows() >= 26:
+            return self._layout("home-medium", lambda: HSplit([
+                self.menu.window, self._divider(),
+                self._text(self._home_details, height=5),
+            ]))
+        return self.menu.window
+
     def _selection_layout(self):
         if self.columns() >= 94:
-            return VSplit([
-                self.selector.window,
-                self._divider_v(),
+            return self._layout("select-wide", lambda: VSplit([
+                self.selector.window, self._divider_v(),
                 self._text(self._component_details),
-            ], padding=1)
+            ], padding=1))
         if self.rows() >= 25 and self.columns() >= 64:
-            return HSplit([
-                self.selector.window,
-                self._divider(),
+            return self._layout("select-medium", lambda: HSplit([
+                self.selector.window, self._divider(),
                 self._text(self._component_details, height=6),
-            ])
+            ]))
         return self.selector.window
 
     def _filter_layout(self):
         from prompt_toolkit.layout import ConditionalContainer
-        return ConditionalContainer(
+        return self._layout("filter", lambda: ConditionalContainer(
             content=self.filter_input,
             filter=Condition(lambda: self.filter_active),
-        )
+        ))
 
     def _confirm_layout(self):
-        # A compact summary and context-specific options, not two huge frames.
-        return HSplit([
+        return self._layout("confirm", lambda: HSplit([
             self._text(self._confirm_tokens, height=Dimension(min=5, weight=2)),
             self._divider(),
             self._text(lambda: [
@@ -437,32 +439,26 @@ class DevboxTUI:
                 ("", "\n"),
             ], height=2),
             self.options.window,
-        ])
+        ]))
 
     def _run_layout(self):
-        if self.expanded_log:
-            return HSplit([
-                self._text(self._progress_tokens, height=2),
-                self.status_view,
-                self._divider(),
-                self._text(lambda: [("class:section", "  EXPANDED OUTPUT")], height=1),
-                self.log_view,
-            ])
-        return HSplit([
+        return self._layout("run", lambda: HSplit([
             self._text(self._progress_tokens, height=2),
             self.status_view,
             self._divider(),
-            self._text(lambda: [("class:section", "  RECENT OUTPUT")], height=1),
+            self._text(lambda: [
+                ("class:section", "  EXPANDED OUTPUT" if self.expanded_log
+                 else "  RECENT OUTPUT"),
+            ], height=1),
             self.log_view,
-        ])
+        ]))
 
     def _logs_layout(self):
         if self.columns() >= 94:
-            return VSplit([
-                self.log_files.window,
-                self._divider_v(),
+            return self._layout("logs-wide", lambda: VSplit([
+                self.log_files.window, self._divider_v(),
                 self._text(self._history_details),
-            ], padding=1)
+            ], padding=1))
         return self.log_files.window
 
     def _home_details(self):
@@ -696,6 +692,8 @@ class DevboxTUI:
             self.action = action
             self.available = inventory()
             self.selector = self._make_selector()
+            self._layout_cache.pop("select-wide", None)
+            self._layout_cache.pop("select-medium", None)
             self.filter_active = False
             self.filter_input.text = ""
             self._notice(f"Select tools to {action}. Space toggles the highlighted row.")
@@ -732,6 +730,7 @@ class DevboxTUI:
             if "keychain" in self.selected:
                 options.append(Entry("ssh_key", "Generate unencrypted Ed25519 key if needed"))
         self.options = self._make_options(options)
+        self._layout_cache.pop("confirm", None)
         self._notice("Review the plan. Optional changes are OFF by default.")
         self.navigate("confirm", self.options.window)
 
@@ -922,6 +921,7 @@ class DevboxTUI:
         log_dir = STATE_ROOT / "logs"
         paths = sorted(log_dir.glob("*.log"), reverse=True)[:100] if log_dir.exists() else []
         self.log_files = self._make_log_list(paths)
+        self._layout_cache.pop("logs-wide", None)
         self.filter_active = False
         self.filter_input.text = ""
         self._notice(f"{len(paths)} recent run log(s).")
