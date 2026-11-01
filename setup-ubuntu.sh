@@ -245,17 +245,19 @@ run_component() {
 
     CURRENT_COMPONENT="$component"
     COMPONENT_STATUS["$component"]=FAILED
-    DEVBOX_COMPONENT_SKIPPED=0
+    DEVBOX_COMPONENT_CONFIG_SKIPPED=0
     log "Installing: $component"
     # Do not put source in an if/! condition: it would disable errexit in installers.
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/installers/$installer"
-    if (( DEVBOX_COMPONENT_SKIPPED )); then
-        COMPONENT_STATUS["$component"]=SKIPPED
+    if (( DEVBOX_COMPONENT_CONFIG_SKIPPED )); then
+        # The package is installed, but optional shell configuration was skipped.
+        verify_component "$component"
+        COMPONENT_STATUS["$component"]=INSTALLED
     else
         verify_component "$component"
         case "$component" in
-            fzf|direnv|zoxide|keychain|zsh|powerlevel10k|nvidia|kubectl)
+            fzf|direnv|zoxide|keychain|zsh|powerlevel10k|nvidia)
                 COMPONENT_STATUS["$component"]=CONFIGURED ;;
             *) COMPONENT_STATUS["$component"]=INSTALLED ;;
         esac
