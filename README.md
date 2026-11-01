@@ -21,10 +21,23 @@ Requires Ubuntu, Bash, an interactive terminal, network access, and `sudo` privi
 ## Components
 
 - Base packages (always): compiler/build tools, Git, curl, wget, CA certificates, and GnuPG. No automatic full-system `apt upgrade`.
-- Optional: Zsh + Oh My Zsh, syntax highlighting, autosuggestions, Powerlevel10k; uv; SSH keychain; zoxide; Docker Engine; NVIDIA Container Toolkit; kubectl; and Minikube.
+- Optional: Zsh + Oh My Zsh, syntax highlighting, autosuggestions, Powerlevel10k; uv; SSH keychain; zoxide; **fzf, ripgrep, bat + fd, direnv**; Docker Engine; NVIDIA Container Toolkit; kubectl; and Minikube.
 - Optional at the end: apt cleanup and reboot.
 
 Each optional component is prompted separately and defaults to **No**. Powerlevel10k is offered after installing Zsh; NVIDIA Container Toolkit is offered after Docker Engine. Configuration is written to the selected shell (`~/.zshrc` or `~/.bashrc`). The installer preserves an existing `~/.p10k.zsh` instead of overwriting it, and avoids repeating marked configuration blocks.
+
+## CLI tools
+
+The four opt-in CLI groups are documented individually, including official upstream sources, verification and usage:
+
+| Installer | Purpose | Guide |
+| --- | --- | --- |
+| `fzf` | Interactive fuzzy search, Ctrl-R history, file picker | [fzf](docs/installers/fzf.md) |
+| `ripgrep` (`rg`) | Fast code/content search | [ripgrep](docs/installers/ripgrep.md) |
+| `bat` + `fd` | Syntax-highlighted file viewer and filename search | [bat + fd](docs/installers/bat-fd.md) |
+| `direnv` | Project-specific environment variables with explicit approval | [direnv](docs/installers/direnv.md) |
+
+For Ubuntu versions that ship `batcat`/`fdfind`, the installer creates `~/.local/bin/bat` and `~/.local/bin/fd` symlinks **only when those names are not already in use**. You may need to log in again to have `~/.local/bin` on `PATH`. No `cat`, `find`, or other existing command is replaced.
 
 ## Notes
 

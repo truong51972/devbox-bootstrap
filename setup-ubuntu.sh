@@ -85,6 +85,19 @@ if confirm 'Install zoxide?'; then
     # shellcheck source=installers/zoxide.sh
     source "$SCRIPT_DIR/installers/zoxide.sh"
 fi
+# CLI utilities are independent opt-in components.
+if confirm 'Install fzf (interactive fuzzy finder and shell key bindings)?'; then
+    # shellcheck source=installers/fzf.sh
+    source "$SCRIPT_DIR/installers/fzf.sh"
+fi
+if confirm 'Install ripgrep (rg; search inside source files)?'; then
+    # shellcheck source=installers/ripgrep.sh
+    source "$SCRIPT_DIR/installers/ripgrep.sh"
+fi
+if confirm 'Install bat and fd (file preview and filename search)?'; then
+    # shellcheck source=installers/bat-fd.sh
+    source "$SCRIPT_DIR/installers/bat-fd.sh"
+fi
 if confirm 'Install Docker Engine?'; then
     # shellcheck source=installers/docker.sh
     source "$SCRIPT_DIR/installers/docker.sh"
@@ -96,6 +109,11 @@ fi
 if confirm 'Install kubectl (and optionally Minikube)?'; then
     # shellcheck source=installers/k8s.sh
     source "$SCRIPT_DIR/installers/k8s.sh"
+fi
+# Add direnv last, so its shell hook follows other prompt integrations.
+if confirm 'Install direnv (project-local environment variables)?'; then
+    # shellcheck source=installers/direnv.sh
+    source "$SCRIPT_DIR/installers/direnv.sh"
 fi
 if confirm 'Run apt autoremove/autoclean?'; then
     # shellcheck source=installers/clean.sh
