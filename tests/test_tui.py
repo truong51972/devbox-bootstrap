@@ -133,6 +133,46 @@ class TUIBasicTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_keyboard_doctor_result_log_and_return(self):
+        """Doctor -> result -> log -> result -> home using only keystrokes."""
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        async def scenario():
+            with TemporaryDirectory() as tmp, patch("tui.app.STATE_ROOT", Path(tmp)):
+                with patch("tui.app.build_command", return_value=["bash", "-c", "echo doctor-test-ok"]):
+                    with create_pipe_input() as pipe:
+                        with create_app_session(input=pipe, output=DummyOutput()):
+                            app = DevboxTUI()
+                            run = asyncio.create_task(app.app.run_async())
+                            try:
+                                await asyncio.sleep(0.10)
+                                pipe.send_text("jj\r")  # Doctor is third menu entry.
+                                for _ in range(30):
+                                    await asyncio.sleep(0.10)
+                                    if app.screen == "result":
+                                        break
+                                self.assertEqual(app.screen, "result")
+                                self.assertIn("doctor-test-ok", app.results_view.text)
+                                pipe.send_text("l")
+                                await asyncio.sleep(0.15)
+                                self.assertEqual(app.screen, "view_log")
+                                pipe.send_text("\x1b")
+                                await asyncio.sleep(0.20)
+                                self.assertEqual(app.screen, "result")
+                                pipe.send_text("\r")
+                                await asyncio.sleep(0.10)
+                                self.assertEqual(app.screen, "home")
+                                pipe.send_text("q")
+                                await asyncio.wait_for(run, 2)
+                            finally:
+                                if not run.done():
+                                    app.app.exit()
+                                    await asyncio.wait_for(run, 2)
+
+        asyncio.run(scenario())
+
     def test_invalid_command_and_selection(self):
         for action, selected in [
             ("delete", []), ("install", []), ("upgrade", ["not-a-tool"]),
