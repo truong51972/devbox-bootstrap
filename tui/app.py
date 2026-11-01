@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from functools import lru_cache
 import os
 from pathlib import Path
 import shutil
@@ -75,6 +76,12 @@ WARNINGS = {
     "keychain": "Optional key generation produces a key without a passphrase.",
     "zsh": "Changing the login shell affects future terminal sessions.",
 }
+@lru_cache(maxsize=64)
+def _cached_log_tail(path: str, size: int, modified_ns: int) -> str:
+    """Cache history previews until log size or mtime changes."""
+    return log_tail(Path(path), count=5)
+
+
 HELP = """NAVIGATION
   Up/Down or j/k     Move highlight
   Enter              Open selection or continue
@@ -285,23 +292,51 @@ class DevboxTUI:
     def _divider(self):
         return Window(height=1, char="─", style="class:divider")
 
+    @staticmethod
+    def _truncate(message: str, width: int) -> str:
+        """Prevent one-line header/footer/notice text from being clipped mid-key."""
+        if width <= 0:
+            return ""
+        return message if len(message) <= width else (
+            message[:max(0, width - 1)] + "…"
+        )
+
     def _page(self, title: str, body, shortcut: str):
-        header = self._text(
-            lambda: [
-                ("class:header", "  DEVBOX "),
-                ("class:muted", " / " + title.upper()),
-                ("class:muted", "     Ubuntu / WSL"),
-            ],
-            height=1,
-        )
-        notice = self._text(
-            lambda: [("class:statusbar", "  " + self.message)], height=1
-        )
-        footer = self._text(
-            lambda: [("class:footer", "  " + shortcut)], height=1
-        )
+        compact = {
+            "Main menu": "↑↓ Move  Enter Open  t Theme  ? Help  q Quit",
+            "Components": "↑↓ Move  Space Toggle  / Filter  i Info  Enter Next",
+            "Confirm": "Space Options  d Dry-run  Enter Run  Esc Back",
+            "Execution": "l Expand log  Exit locked",
+            "Result": "l Log  Enter Home  Esc Back",
+            "History": "↑↓ Move  / Filter  Enter Open  Esc Back",
+            "Log viewer": "↑↓ Scroll  o Pager  Esc Back",
+            "Keyboard help": "Esc Back",
+            "Component details": "Esc Back",
+        }
+        def header_text():
+            width = max(0, self.columns() - 2)
+            suffix = "     Ubuntu / WSL" if width >= 75 else ""
+            value = self._truncate(
+                f"  DEVBOX / {title.upper()}{suffix}", width
+            )
+            return [("class:header", value)]
+
+        def notice_text():
+            return [("class:statusbar", self._truncate(
+                "  " + self.message, max(0, self.columns() - 1)
+            ))]
+
+        def footer_text():
+            width = max(0, self.columns() - 2)
+            value = compact.get(title, shortcut) if width < 85 else shortcut
+            return [("class:footer", self._truncate("  " + value, width))]
+
         return HSplit([
-            header, self._divider(), body, notice, footer,
+            self._text(header_text, height=1),
+            self._divider(),
+            body,
+            self._text(notice_text, height=1),
+            self._text(footer_text, height=1),
         ])
 
     def _build_views(self) -> None:
@@ -506,16 +541,19 @@ class DevboxTUI:
             return [("class:muted", "  No logs found.")]
         path = Path(item.key)
         try:
-            size = path.stat().st_size
+            stat = path.stat()
+            size, mtime_ns = stat.st_size, stat.st_mtime_ns
         except OSError:
-            size = 0
+            size, mtime_ns = 0, 0
         return [
             ("class:section", "  SELECTED RUN\n\n"),
             ("class:title", "  " + item.label + "\n\n"),
             ("class:muted", f"  Size: {size:,} bytes\n"),
             ("class:muted", "  " + str(path) + "\n\n"),
             ("class:section", "  LAST OUTPUT\n"),
-            ("class:body", "  " + log_tail(path, count=5).replace("\n", "\n  ")),
+            ("class:body", "  " + _cached_log_tail(
+                str(path), size, mtime_ns
+            ).replace("\n", "\n  ")),
         ]
 
     def _show_component_info(self) -> None:
