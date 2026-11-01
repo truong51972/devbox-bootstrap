@@ -20,7 +20,7 @@ Requires Ubuntu, Bash, an interactive terminal, network access, and `sudo` privi
 
 ## Components
 
-- Base packages (always): compiler/build tools, Git, curl, wget, CA certificates, and GnuPG. No automatic full-system `apt upgrade`.
+- Base packages (interactive full setup only): compiler/build tools, Git, curl, wget, CA certificates, and GnuPG. No automatic full-system `apt upgrade`.
 - Optional: Zsh + Oh My Zsh, syntax highlighting, autosuggestions, Powerlevel10k; uv; SSH keychain; zoxide; **fzf, ripgrep, bat + fd, direnv**; Docker Engine; NVIDIA Container Toolkit; kubectl; and Minikube.
 - Optional at the end: apt cleanup and reboot.
 
@@ -43,7 +43,7 @@ For Ubuntu versions that ship `batcat`/`fdfind`, the installer creates `~/.local
 
 - The NVIDIA Container Toolkit step configures the Docker runtime and restarts Docker. It requires a working NVIDIA driver on the host; WSL and rootless Docker may require additional configuration.
 - Docker's `docker` group provides root-equivalent access. Joining it is an explicit opt-in and requires logging out and back in.
-- kubectl is downloaded for `amd64` or `arm64` and verified against its published SHA-256 checksum. Existing kubectl installations are left untouched.
+- kubectl is downloaded for `amd64` or `arm64` and verified against its published SHA-256 checksum. Existing kubectl installations are preserved by default; a pinned version requires confirmation before replacing a different version.
 - Installing Powerlevel10k requires a terminal with Nerd Font glyph support, such as [MesloLGS NF](https://github.com/romkatv/powerlevel10k#fonts). Existing themes/configuration are not migrated automatically.
 - The script is intended for personal developer workstations, **not** for fully unattended CI/provisioning. You can rerun it, but review prompts and changes before accepting; system-level installs and third-party installer scripts can still change your environment.
 
@@ -94,6 +94,9 @@ for every installer. The CLI tool guides linked above contain usage examples.
 ```bash
 find . -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
 bash tests/smoke.sh
+bash tests/cli.sh
+bash tests/config.sh
+bash tests/docker.sh
 ```
 
 CI also runs ShellCheck. Tests do not perform real package installations.
