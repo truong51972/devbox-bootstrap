@@ -28,7 +28,7 @@ from tui.backend import (
     read_events,
 )
 from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, inventory, with_dependencies
-from tui.ui import Entry, KeyboardList, STYLE, STATUS_STYLES, read_only_window
+from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
 
 FINISHED_STATES = FINAL_STATES
 MENU = (
@@ -97,6 +97,7 @@ EXECUTION / RESULTS
   l                  View saved log (after completion)
   o                  Open external pager from log viewer
   PageUp/PageDown    Scroll text and logs
+  t                  Toggle minimalist / monochrome theme (home)
   q                  Exit on home screen only
 
 Changes that require explicit consent are OFF by default.
@@ -126,6 +127,9 @@ class DevboxTUI:
         self.last_result = ""
         self.run_task: asyncio.Task[None] | None = None
         self.filter_active = False
+        self.theme = os.environ.get("DEVBOX_THEME", "minimal").lower()
+        if self.theme not in THEMES:
+            self.theme = "minimal"
         self.expanded_log = False
         self._search_text = ""
 
@@ -181,7 +185,7 @@ class DevboxTUI:
             key_bindings=self._key_bindings(),
             full_screen=True,
             mouse_support=False,
-            style=Style.from_dict(STYLE),
+            style=Style.from_dict(THEMES[self.theme]),
         )
         self.app.ttimeoutlen = 0.08
         self.app.timeoutlen = 0.10
@@ -209,6 +213,7 @@ class DevboxTUI:
             on_help=self._show_help,
             on_change=self._invalidate,
             on_quit=self.quit,
+            on_theme=self.toggle_theme,
             get_columns=self.columns,
         )
 
@@ -288,7 +293,7 @@ class DevboxTUI:
         self.views["home"] = self._page(
             "Main menu",
             DynamicContainer(self._home_layout),
-            "↑↓/j/k Navigate   Enter Open   ? Help   q Quit",
+            "↑↓/j/k Navigate   Enter Open   t Theme   ? Help   q Quit",
         )
         self.views["select"] = self._page(
             "Components",
@@ -598,6 +603,11 @@ class DevboxTUI:
     def _notice(self, message: str) -> None:
         self.message = message
         self._invalidate()
+
+    def toggle_theme(self) -> None:
+        self.theme = "mono" if self.theme == "minimal" else "minimal"
+        self.app.style = Style.from_dict(THEMES[self.theme])
+        self._notice(f"Theme: {self.theme}. Set DEVBOX_THEME={self.theme} to keep it on launch.")
 
     def open_menu(self) -> None:
         action = self.menu.current_value
