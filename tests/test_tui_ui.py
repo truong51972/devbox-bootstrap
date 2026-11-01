@@ -181,6 +181,20 @@ class LayoutTests(unittest.TestCase):
                     self.assertLessEqual(len(output), width - 2)
                     self.assertTrue(output.strip())
 
+    def test_filter_escape_clears_before_leaving_history(self):
+        with TemporaryDirectory() as tmp, patch("tui.app.STATE_ROOT", Path(tmp)):
+            logs = Path(tmp) / "logs"
+            logs.mkdir()
+            (logs / "20261101-111020-doctor-test.log").write_text("healthy\n")
+            app = DevboxTUI()
+            app.list_history()
+            app.log_files.set_query("doctor")
+            app.back()
+            self.assertEqual(app.screen, "logs")
+            self.assertEqual(app.log_files.query, "")
+            app.back()
+            self.assertEqual(app.screen, "home")
+
     def test_history_preview_is_cached_until_log_changes(self):
         from tui.app import _cached_log_tail
         with TemporaryDirectory() as tmp, patch("tui.app.STATE_ROOT", Path(tmp)):
@@ -285,6 +299,11 @@ class LayoutTests(unittest.TestCase):
                         pipe.send_text("\x1b")
                         await asyncio.sleep(0.30)
                         self.assertEqual(app.screen, "select")
+                        self.assertEqual(app.selector.query, "fzf")
+                        pipe.send_text("\x1b")
+                        await asyncio.sleep(0.30)
+                        self.assertEqual(app.screen, "select")
+                        self.assertEqual(app.selector.query, "")
                         pipe.send_text("\x1b")
                         await asyncio.sleep(0.30)
                         self.assertEqual(app.screen, "home")
