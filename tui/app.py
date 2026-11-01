@@ -143,6 +143,54 @@ class DevboxTUI:
                 "selected-option": "fg:ansicyan bold",
             }),
         )
+        self._bind_choice(self.menu, self.open_menu, radio=True, home=True)
+
+    def _bind_choice(self, widget, on_enter, *, radio=False, home=False, selector=False, confirm=False) -> None:
+        """List controls capture Enter and Keys.Any before application bindings."""
+        bindings = widget.control.key_bindings
+
+        @bindings.add("enter")
+        def _enter(_event):
+            if radio:
+                widget._handle_enter()  # Commit highlighted radio option.
+            on_enter()
+
+        @bindings.add("escape")
+        def _back(_event):
+            self.back()
+
+        @bindings.add("?")
+        def _help(_event):
+            self._show_help()
+
+        @bindings.add("c-q")
+        def _quit(_event):
+            self.quit()
+
+        if home:
+            @bindings.add("q")
+            def _quit_home(_event):
+                self.quit()
+
+        if selector:
+            @bindings.add("a")
+            def _all(_event):
+                widget.current_values = list(ORDER)
+                self._notice("All components selected.")
+
+            @bindings.add("n")
+            def _none(_event):
+                widget.current_values = []
+                self._notice("Selection cleared.")
+
+        if confirm:
+            @bindings.add("d")
+            def _dry(_event):
+                self.toggle_dry_run()
+
+    def _show_help(self) -> None:
+        self.help_return_screen = self.screen
+        self.navigate("help", self.help_view)
 
     def _page(self, title: str, body, hint: str):
         return HSplit([
@@ -212,8 +260,7 @@ class DevboxTUI:
 
         @kb.add("?", filter=Condition(lambda: self.screen != "help"))
         def _help(_event):
-            self.help_return_screen = self.screen
-            self.navigate("help", self.help_view)
+            self._show_help()
 
         @kb.add("q", filter=is_screen("home"))
         @kb.add("c-q")
@@ -240,6 +287,7 @@ class DevboxTUI:
             self.action = action
             self.available = inventory()
             self.selector = self._make_selector()
+            self._bind_choice(self.selector, self.confirm_selection, selector=True)
             self.views["select"] = self._page(
                 "COMPONENTS", Frame(self.selector, title=f"{action.title()} tools (Space)"),
                 "Space: toggle   A: all   N: none   Enter: next   Esc: back")
@@ -277,6 +325,7 @@ class DevboxTUI:
             if "keychain" in self.selected:
                 options.append(("ssh_key", "If needed, generate an Ed25519 key WITHOUT a passphrase"))
         self.options = CheckboxList(options or [("placeholder", "No optional changes")])
+        self._bind_choice(self.options, self.execute_selection, confirm=True)
         self.views["confirm"] = self._page(
             "CONFIRM", VSplit([
                 Frame(Label(lambda: self._selection_summary()), title="Plan",
@@ -458,6 +507,7 @@ class DevboxTUI:
         paths = sorted(log_dir.glob("*.log"), reverse=True)[:100] if log_dir.exists() else []
         self.log_files = RadioList([(str(p), p.name) for p in paths] or
                                    [("", "No saved logs yet.")])
+        self._bind_choice(self.log_files, self.open_history, radio=True)
         self.views["logs"] = self._page(
             "LOG HISTORY", Frame(self.log_files, title="Recent runs (newest first)"),
             "Enter: open log   Esc: main menu")
