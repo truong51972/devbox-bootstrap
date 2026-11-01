@@ -37,7 +37,7 @@ curl -fsSL https://raw.githubusercontent.com/truong51972/devbox-bootstrap/main/s
 - APT-managed tools are updated to the **newest version available in configured APT repositories**, using `apt-get install --only-upgrade` (never `apt upgrade` for the whole machine). `sudo` may ask for a password; Docker package updates may restart its service.
 - Standalone `uv` uses `uv self update` with shell-profile modification disabled. Other uv distributions (pip, pipx, Cargo) must be updated using their original manager.
 - Devbox-managed Powerlevel10k, Oh My Zsh and autosuggestions Git checkouts update only when their tracked files are clean and their remotes match the expected upstream. Existing personal shell configuration is preserved.
-- Devbox-managed `kubectl` and `minikube` binaries under `/usr/local/bin` can upgrade to newer versions only after SHA-256 verification; externally managed versions are preserved. For Kubernetes clusters, pin `kubectl` with `--kubectl-version vMAJOR.MINOR.PATCH` to respect client/server version compatibility.
+- Devbox-managed `kubectl` and `minikube` binaries under `/usr/local/bin` can upgrade to newer versions only after SHA-256 verification; externally managed versions are preserved. For Kubernetes clusters, pin Devbox-managed `kubectl` with `--kubectl-version vMAJOR.MINOR.PATCH` to respect client/server version compatibility; this pinning option is not supported for APT-managed kubectl.
 - `--doctor` remains **read-only**; `--upgrade` must be explicitly requested. Missing tools are **skipped**, not installed. `--dry-run` previews checks without fetching package indexes, releases or changing files.
 
 Alternatively, review the scripts locally before running them:
@@ -111,6 +111,7 @@ bash tests/config.sh
 bash tests/docker.sh
 bash tests/hardening.sh
 bash tests/upgrade.sh
+bash tests/upgrade-binary.sh
 ```
 
 CI also runs ShellCheck. Tests do not perform real package installations.

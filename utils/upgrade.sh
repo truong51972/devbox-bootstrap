@@ -84,6 +84,11 @@ upgrade_zsh_framework() {
     local dir="$HOME/.oh-my-zsh" origin before after
     [[ -f "$dir/tools/upgrade.sh" && -d "$dir/.git" ]] || return 0
     UPGRADE_FOUND=1
+    if ! command -v zsh >/dev/null 2>&1; then
+        warn 'Cannot update Oh My Zsh because Zsh is not installed.'
+        UPGRADE_BLOCKED=1
+        return 0
+    fi
     origin="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"
     if [[ "$origin" != *ohmyzsh/ohmyzsh* || -n "$(git -C "$dir" status --porcelain --untracked-files=no)" ]]; then
         warn 'Skipping Oh My Zsh: custom repository or local modifications.'
@@ -165,6 +170,10 @@ upgrade_binary() {
 upgrade_kubectl() {
     local arch installed target url
     if apt_installed kubectl; then
+        if [[ -n "${BOOTSTRAP_KUBECTL_VERSION:-}" ]]; then
+            die 'Pinning kubectl is only supported for Devbox-managed /usr/local/bin binaries, not APT packages.'
+            return 1
+        fi
         upgrade_apt kubectl
         return 0
     fi

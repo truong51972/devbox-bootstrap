@@ -63,6 +63,10 @@ if [[ -n "$BOOTSTRAP_KUBECTL_VERSION" && ! "$BOOTSTRAP_KUBECTL_VERSION" =~ ^v[0-
     echo 'Invalid kubectl version. Expected vMAJOR.MINOR.PATCH (e.g. v1.35.1).' >&2
     exit 2
 fi
+if (( UPGRADE_ONLY )) && [[ ",$ONLY_COMPONENTS," == *,clean,* ]]; then
+    echo 'Component clean is housekeeping and cannot be upgraded.' >&2
+    exit 2
+fi
 if [[ -n "$ONLY_COMPONENTS" ]]; then
     IFS=',' read -r -a requested <<< "$ONLY_COMPONENTS"
     for component in "${requested[@]}"; do
