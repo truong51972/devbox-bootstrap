@@ -10,8 +10,5 @@ if [ ! -d "${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions" ]; th
 fi
 add_plugin_if_not_exists "zsh-autosuggestions"
 
-# setup syntax highlighting
-if [ ! -d "${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting" ]; then
-    git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
-fi
+# Enable the syntax highlighting plugin bundled with Oh My Zsh
 add_plugin_if_not_exists "zsh-syntax-highlighting"
