@@ -14,7 +14,7 @@ if [[ ! -f "$HOME/powerlevel10k/powerlevel10k.zsh-theme" ]]; then
     git clone --depth 1 https://github.com/romkatv/powerlevel10k.git "$HOME/powerlevel10k"
 fi
 append_if_not_exists_in_script '# Powerlevel10k theme setup' \
-    'source "$HOME/powerlevel10k/powerlevel10k.zsh-theme"' "$HOME/.zshrc"
+    'source "$HOME/powerlevel10k/powerlevel10k.zsh-theme"' "$(zsh_rc_file)"
 
 if [[ ! -e "$HOME/.p10k.zsh" ]]; then
     cp -- "$SCRIPT_DIR/config/.p10k.zsh" "$HOME/.p10k.zsh"
@@ -22,4 +22,4 @@ else
     log 'Keeping existing ~/.p10k.zsh (not overwriting personal theme settings).'
 fi
 append_if_not_exists_in_script '# Powerlevel10k configuration setup' \
-    '[[ ! -f "$HOME/.p10k.zsh" ]] || source "$HOME/.p10k.zsh"' "$HOME/.zshrc"
+    '[[ ! -f "$HOME/.p10k.zsh" ]] || source "$HOME/.p10k.zsh"' "$(zsh_rc_file)"
