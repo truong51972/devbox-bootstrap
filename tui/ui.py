@@ -93,6 +93,8 @@ class KeyboardList:
         on_help: Callable[[], None],
         on_change: Callable[[], None],
         multiple: bool = False,
+        bulk_select: bool = True,
+        empty_text: str = "No matching entries. Press / to edit the filter.",
         get_columns: Callable[[], int] = lambda: 100,
         on_filter: Callable[[], None] | None = None,
         on_quit: Callable[[], None] | None = None,
@@ -102,6 +104,7 @@ class KeyboardList:
     ) -> None:
         self.entries = list(entries)
         self.multiple = multiple
+        self.empty_text = empty_text
         self.selected: set[str] = set()
         self.index = 0
         self.query = ""
@@ -162,7 +165,7 @@ class KeyboardList:
             def _details(_event) -> None:
                 on_details()
 
-        if multiple:
+        if multiple and bulk_select:
             @kb.add("a")
             def _all(_event) -> None:
                 # Preserve selected items hidden by an active filter.
@@ -267,7 +270,7 @@ class KeyboardList:
         fragments: list[tuple[str, str]] = []
         values = self.visible
         if not values:
-            return [("class:muted", "  No matching entries. Press / to edit the filter.")]
+            return [("class:muted", "  " + self.empty_text)]
         last_group = None
         wide = self.get_columns() >= 105
         for i, entry in enumerate(values):
