@@ -22,7 +22,13 @@ MOCK
 cat > "$temp_dir/bin/apt-cache" <<'MOCK'
 #!/usr/bin/env bash
 case "${@: -1}" in
-    fzf) printf '  Candidate: 0.2\n' ;;
+    fzf)
+        printf '  Candidate: 0.2\n'
+        # Regression: large policy table after Candidate must not SIGPIPE
+        # the producer when the caller has set -o pipefail.
+        if [[ "${MOCK_LARGE_APT_POLICY:-0}" == 1 ]]; then
+            awk 'BEGIN {for (i=0; i<20000; i++) print "     0.2 500 http://archive.ubuntu.com/ubuntu noble/main amd64 Packages"}'
+        fi ;;
     bat) printf '  Candidate: 0.1\n' ;;
     *) exit 1 ;;
 esac
@@ -43,6 +49,7 @@ output="$(bash "$repo_dir/setup-ubuntu.sh" --upgrade --dry-run --only fzf,ripgre
 [[ "$output" == *'PLANNED'* && "$output" == *'SKIPPED'* ]]
 [[ ! -e "$MOCK_LOG" ]]
 
+export MOCK_LARGE_APT_POLICY=1
 output="$(bash "$repo_dir/setup-ubuntu.sh" --upgrade --only fzf,ripgrep,bat-fd)"
 [[ "$output" == *'Updating fzf: 0.1 -> 0.2'* ]]
 [[ "$output" == *'UPDATED'* ]]
