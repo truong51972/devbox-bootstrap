@@ -25,6 +25,7 @@ jobs:
           bash tests/upgrade.sh
           bash tests/upgrade-binary.sh
           bash tests/tui-launcher.sh
+          bash tests/tui-runtime.sh
           bash tests/tui-events.sh
       - name: Test Python TUI
         run: |
