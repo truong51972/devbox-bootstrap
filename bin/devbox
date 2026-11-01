@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Devbox CLI and TUI launcher, installed via ~/.local/bin/devbox.
+set -Eeuo pipefail
+script="$(readlink -f -- "${BASH_SOURCE[0]}")"
+root="$(cd -- "$(dirname -- "$script")/.." && pwd)"
+venv="$root/.venv"
+upstream='https://github.com/truong51972/devbox-bootstrap.git'
+
+setup_runtime() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo 'Missing Python 3. On Ubuntu: sudo apt-get install -y python3 python3-venv' >&2
+        return 1
+    fi
+    if [[ ! -x "$venv/bin/python" ]]; then
+        if ! python3 -m venv "$venv"; then
+            echo 'Could not create a venv. On Ubuntu: sudo apt-get install -y python3-venv' >&2
+            return 1
+        fi
+    fi
+    if [[ ! -x "$venv/bin/python" ]]; then
+        echo "Virtual environment is incomplete: $venv" >&2
+        return 1
+    fi
+    "$venv/bin/python" -m pip install --disable-pip-version-check --no-input \
+        -r "$root/tui/requirements.txt"
+}
+
+update_code() {
+    if [[ ! -d "$root/.git" ]]; then
+        echo "Not a Git checkout: $root" >&2
+        return 1
+    fi
+    local origin branch
+    origin="$(git -C "$root" remote get-url origin)"
+    case "$origin" in
+        "$upstream"|https://github.com/truong51972/devbox-bootstrap|git@github.com:truong51972/devbox-bootstrap.git)
+            ;;
+        *)
+            echo "Refusing to update from unexpected origin: $origin" >&2
+            return 1 ;;
+    esac
+    branch="$(git -C "$root" symbolic-ref --quiet --short HEAD || true)"
+    if [[ "$branch" != main ]]; then
+        echo "Refusing to update a non-main checkout (current: $branch)." >&2
+        return 1
+    fi
+    if [[ -n "$(git -C "$root" status --porcelain --untracked-files=no)" ]]; then
+        echo 'Local tracked files have changed. Review them before updating.' >&2
+        return 1
+    fi
+    # Only fast-forward: never reset local source or force overwrite user edits.
+    git -C "$root" fetch --no-tags origin main
+    git -C "$root" merge --ff-only FETCH_HEAD
+    setup_runtime
+    printf 'Devbox code is current: %s\n' "$(git -C "$root" rev-parse --short HEAD)"
+    echo 'Restart the TUI to load updated Python code.'
+}
+
+case "${1:-}" in
+    --help|-h)
+        cat <<'HELP'
+Usage: devbox [OPTION]
+  (no args)        Launch interactive TUI
+  --update         Pull latest Devbox source from GitHub (fast-forward only)
+  --setup-runtime  Create/update the isolated Python venv
+  --version        Show installed Devbox Git revision
+  --doctor         Run read-only diagnostics via the Bash backend
+  --preflight      Inspect host environment
+  --upgrade ...    Upgrade installed tools (not Devbox source code)
+  --only ...       Install the selected tools
+  --help           Show this help
+HELP
+        ;;
+    --version)
+        git -C "$root" rev-parse --short HEAD ;;
+    --update)
+        update_code ;;
+    --setup-runtime)
+        setup_runtime ;;
+    '')
+        if [[ ! -t 0 || ! -t 1 ]]; then
+            echo "The TUI requires an interactive terminal. Use 'devbox --doctor' or 'devbox --help'." >&2
+            exit 1
+        fi
+        if [[ ! -x "$venv/bin/python" ]] || ! "$venv/bin/python" -c 'import prompt_toolkit' 2>/dev/null; then
+            setup_runtime
+        fi
+        cd "$root"
+        exec "$venv/bin/python" -m tui.app ;;
+    --doctor|--preflight|--upgrade|--dry-run|--only|--kubectl-version)
+        exec bash "$root/setup-ubuntu.sh" "$@" ;;
+    *)
+        echo "Unknown argument: $1 (try devbox --help)." >&2
+        exit 2 ;;
+esac
