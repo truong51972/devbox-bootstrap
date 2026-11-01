@@ -5,7 +5,8 @@ if [[ -f "$HOME/.ssh/git" ]]; then
 elif [[ -f "$HOME/.ssh/id_ed25519" ]]; then
     key_file="$HOME/.ssh/id_ed25519"
 elif confirm 'Generate a new Ed25519 SSH key at ~/.ssh/git?'; then
-    mkdir -p -m 700 "$HOME/.ssh"
+    mkdir -p -- "$HOME/.ssh"
+    chmod 700 -- "$HOME/.ssh"
     ssh-keygen -t ed25519 -f "$HOME/.ssh/git"
     key_file="$HOME/.ssh/git"
 fi
