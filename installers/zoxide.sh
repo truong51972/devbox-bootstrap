@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# zoxide: smarter jumping to frequently used directories.
+# Upstream: https://github.com/ajeetdsouza/zoxide
 sudo apt-get install -y zoxide
 case "${BOOTSTRAP_TARGET_SHELL:-${SHELL##*/}}" in
     zsh) shell_name=zsh ;;

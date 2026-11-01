@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# On some Ubuntu releases the binaries are named batcat and fdfind.
+# bat: syntax-highlighted file viewer; fd: fast filename/directory search.
+# Upstream: https://github.com/sharkdp/bat | https://github.com/sharkdp/fd
 sudo apt-get install -y bat fd-find
 
 # Create user-local command aliases via symlinks, without overwriting other tools.

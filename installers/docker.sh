@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Docker Engine: install Docker CE for Ubuntu, checking conflicting packages.
+# Docs: https://docs.docker.com/engine/install/ubuntu/
 if dpkg-query -W -f='${Status}' docker-ce 2>/dev/null | grep -q 'install ok installed'; then
     log 'Docker Engine (docker-ce) is already installed.'
 else

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Zsh + Oh My Zsh, autosuggestions and bundled syntax highlighting.
+# Upstream: https://ohmyz.sh/ | https://github.com/zsh-users/zsh-autosuggestions
 sudo apt-get install -y zsh git curl ca-certificates
 if [[ ! -f "$HOME/.oh-my-zsh/oh-my-zsh.sh" ]]; then
     log 'Installing Oh My Zsh.'

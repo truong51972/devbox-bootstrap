@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Optional version pin for compatibility with an existing Kubernetes control plane.
+# kubectl CLI (optionally Minikube); check Kubernetes client version skew.
+# Docs: https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
+# Minikube: https://minikube.sigs.k8s.io/docs/start/
 requested_version="${BOOTSTRAP_KUBECTL_VERSION:-}"
 install_kubectl=true
 if command -v kubectl >/dev/null 2>&1; then

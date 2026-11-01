@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# keychain: reuse SSH agents/keys across interactive shell sessions.
+# Upstream: https://github.com/funtoo/keychain
 key_file=''
 sudo apt-get install -y keychain
 if [[ -f "$HOME/.ssh/git" ]]; then

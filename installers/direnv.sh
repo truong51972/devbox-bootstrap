@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# direnv executes trusted .envrc files after explicit 'direnv allow'.
+# direnv: load per-project environment from explicitly approved .envrc files.
+# Docs: https://direnv.net/
 sudo apt-get install -y direnv
 
 case "${BOOTSTRAP_TARGET_SHELL:-${SHELL##*/}}" in

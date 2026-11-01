@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Read-only host inspection. No package installation or config mutation.
+# Read-only inspection of Ubuntu/WSL, Docker, NVIDIA and available disk space.
+# WSL docs: https://learn.microsoft.com/en-us/windows/wsl/
 log 'Preflight — host inspection'
 log "OS: ${PRETTY_NAME:-${ID:-unknown}}"
 log "Architecture: $(uname -m)"

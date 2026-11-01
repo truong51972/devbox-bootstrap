@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# NVIDIA Container Toolkit: GPU runtime integration for Docker Engine.
+# Docs: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html
 if ! command -v docker >/dev/null 2>&1; then
     die 'Docker Engine must be installed before NVIDIA Container Toolkit.'
     return 1

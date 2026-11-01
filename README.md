@@ -28,16 +28,9 @@ Each optional component is prompted separately and defaults to **No**. Powerleve
 
 ## CLI tools
 
-The four opt-in CLI groups are documented individually, including official upstream sources, verification and usage:
+Optional tools: `fzf` (interactive selection), `ripgrep` (search file contents), `bat + fd` (view/find files) and `direnv` (per-project environment). Their installer scripts contain short explanations and upstream links in the header comments.
 
-| Installer | Purpose | Guide |
-| --- | --- | --- |
-| `fzf` | Interactive fuzzy search, Ctrl-R history, file picker | [fzf](docs/installers/fzf.md) |
-| `ripgrep` (`rg`) | Fast code/content search | [ripgrep](docs/installers/ripgrep.md) |
-| `bat` + `fd` | Syntax-highlighted file viewer and filename search | [bat + fd](docs/installers/bat-fd.md) |
-| `direnv` | Project-specific environment variables with explicit approval | [direnv](docs/installers/direnv.md) |
-
-For Ubuntu versions that ship `batcat`/`fdfind`, the installer creates `~/.local/bin/bat` and `~/.local/bin/fd` symlinks **only when those names are not already in use**. You may need to log in again to have `~/.local/bin` on `PATH`. No `cat`, `find`, or other existing command is replaced.
+On Ubuntu, `bat`/`fd` can be installed as `batcat`/`fdfind`; local symlinks are created only when the command names are free.
 
 ## Notes
 
@@ -46,7 +39,6 @@ For Ubuntu versions that ship `batcat`/`fdfind`, the installer creates `~/.local
 - kubectl is downloaded for `amd64` or `arm64` and verified against its published SHA-256 checksum. Existing kubectl installations are preserved by default; a pinned version requires confirmation before replacing a different version.
 - Installing Powerlevel10k requires a terminal with Nerd Font glyph support, such as [MesloLGS NF](https://github.com/romkatv/powerlevel10k#fonts). Existing themes/configuration are not migrated automatically.
 - The script is intended for personal developer workstations, **not** for fully unattended CI/provisioning. You can rerun it, but review prompts and changes before accepting; system-level installs and third-party installer scripts can still change your environment.
-
 
 ## Inspect, preview, and select installs
 
@@ -75,19 +67,6 @@ Every selected installer performs a lightweight post-install check for its binar
 or expected artifact. This does **not** replace an end-to-end runtime test:
 Docker daemon/GPU availability and Kubernetes cluster connectivity must be tested
 separately.
-
-## All installers and official references
-
-See [the installer catalog](docs/installers/README.md) for purpose, official
-website/repository, installation method, verification commands and caveats
-for every installer. The CLI tool guides linked above contain usage examples.
-
-- [Docker Engine](docs/installers/docker.md) documents package conflict
-  detection. The script refuses to remove existing conflicting packages.
-- [kubectl](docs/installers/kubectl.md) explains version selection and version
-  skew: choose a client within one minor version of the Kubernetes cluster.
-- [NVIDIA Container Toolkit](docs/installers/nvidia.md) explains host prerequisites
-  and verifying `nvidia-ctk` / Docker GPU runtime.
 
 ## Validation
 

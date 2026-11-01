@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# fzf: fuzzy finder with optional Bash/Zsh key bindings and completion.
+# fzf: fuzzy finder with Bash/Zsh key bindings and completion.
+# Upstream: https://github.com/junegunn/fzf
 sudo apt-get install -y fzf
 
 case "${BOOTSTRAP_TARGET_SHELL:-${SHELL##*/}}" in

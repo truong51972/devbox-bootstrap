@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Powerlevel10k: Zsh prompt theme; existing ~/.p10k.zsh is preserved.
+# Upstream: https://github.com/romkatv/powerlevel10k
 if ! command -v zsh >/dev/null 2>&1; then
     die 'Powerlevel10k requires Zsh; install the zsh component first.'
     return 1

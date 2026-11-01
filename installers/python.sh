@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# uv: install Python versions, manage environments and project dependencies.
+# Docs: https://docs.astral.sh/uv/
 if command -v uv >/dev/null 2>&1 || [[ -x "$HOME/.local/bin/uv" ]]; then
     log 'uv already installed; skipping.'
 else
