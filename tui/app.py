@@ -145,6 +145,8 @@ class DevboxTUI:
             text="", read_only=True, focusable=False, scrollbar=True,
             wrap_lines=False,
         )
+        self.status_view.window.height = Dimension(weight=3, min=6)
+        self.log_view.window.height = Dimension(weight=2, min=5)
         self.results_view = TextArea(
             text="", read_only=True, focusable=True, scrollbar=True,
             wrap_lines=False,
@@ -577,6 +579,14 @@ class DevboxTUI:
             @kb.add("l")
             def _expand(_event):
                 self.expanded_log = not self.expanded_log
+                self.status_view.window.height = (
+                    Dimension(min=3, max=4) if self.expanded_log
+                    else Dimension(weight=3, min=6)
+                )
+                self.log_view.window.height = (
+                    Dimension(weight=1, min=6) if self.expanded_log
+                    else Dimension(weight=2, min=5)
+                )
                 self.log_view.text = log_tail(
                     self.log_path, count=25 if self.expanded_log else 10
                 )
