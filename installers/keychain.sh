@@ -15,6 +15,7 @@ elif confirm 'Generate a new Ed25519 SSH key at ~/.ssh/git?'; then
 fi
 if [[ -z "$key_file" ]]; then
     warn 'No SSH private key selected; skipping keychain.'
+    DEVBOX_COMPONENT_SKIPPED=1
 else
     key_ref="\$HOME/.ssh/${key_file##*/}"
     append_if_not_exists_in_script '# Keychain setup' \

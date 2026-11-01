@@ -59,23 +59,3 @@ fi'
     *) warn 'Skipping kubectl shell completion for unsupported shell.' ;;
 esac
 
-if confirm 'Install Minikube as well?'; then
-    if command -v minikube >/dev/null 2>&1; then
-        log 'Minikube already installed; skipping.'
-    else
-        architecture="$(dpkg --print-architecture)"
-        case "$architecture" in
-            amd64|arm64) ;;
-            *) die "Unsupported Minikube architecture: $architecture"; return 1 ;;
-        esac
-        ( set -Eeuo pipefail
-          temp="$(mktemp)"
-          trap 'rm -f -- "$temp"' EXIT
-          curl -fsSL "https://github.com/kubernetes/minikube/releases/latest/download/minikube-linux-${architecture}" -o "$temp"
-          sudo install -o root -g root -m 0755 "$temp" /usr/local/bin/minikube
-        )
-    fi
-    if [[ "${BOOTSTRAP_TARGET_SHELL:-${SHELL##*/}}" == zsh ]]; then
-        add_plugin_if_not_exists minikube
-    fi
-fi
