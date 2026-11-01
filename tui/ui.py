@@ -31,6 +31,26 @@ STYLE = {
     "statusbar": "fg:ansibrightblack",
     "body": "fg:ansiwhite",
 }
+MONO_STYLE = {
+    # Works on monochrome terminals and themes without ANSI palette support.
+    "header": "bold",
+    "title": "bold",
+    "section": "bold",
+    "muted": "",
+    "divider": "",
+    "focus": "reverse bold",
+    "checked": "bold",
+    "installed": "bold",
+    "missing": "",
+    "warning": "bold",
+    "error": "reverse bold",
+    "running": "bold",
+    "footer": "bold",
+    "statusbar": "",
+    "body": "",
+}
+THEMES = {"minimal": STYLE, "mono": MONO_STYLE}
+
 STATUS_STYLES = {
     "Installed": "class:installed",
     "Missing": "class:missing",
@@ -78,6 +98,7 @@ class KeyboardList:
         on_quit: Callable[[], None] | None = None,
         on_dry: Callable[[], None] | None = None,
         on_details: Callable[[], None] | None = None,
+        on_theme: Callable[[], None] | None = None,
     ) -> None:
         self.entries = list(entries)
         self.multiple = multiple
@@ -156,6 +177,11 @@ class KeyboardList:
             @kb.add("q")
             def _quit_shortcut(_event) -> None:
                 on_quit()
+
+        if on_theme:
+            @kb.add("t")
+            def _theme(_event) -> None:
+                on_theme()
 
         if on_dry:
             @kb.add("d")
