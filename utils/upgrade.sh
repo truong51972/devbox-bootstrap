@@ -28,7 +28,7 @@ apt_installed() {
 }
 
 upgrade_apt() {
-    local package installed candidate
+    local package installed candidate policy
     for package in "$@"; do
         apt_installed "$package" || continue
         UPGRADE_FOUND=1
@@ -41,7 +41,14 @@ upgrade_apt() {
             UPGRADE_APT_REFRESHED=1
         fi
         installed="$(dpkg-query -W -f='${Version}' "$package")"
-        candidate="$(apt-cache policy "$package" | awk '/^[[:space:]]*Candidate:/ {print $2; exit}')"
+        # Consume the complete apt-cache output. Exiting awk early can SIGPIPE
+        # apt-cache and abort this function under 'set -o pipefail'.
+        if ! policy="$(apt-cache policy "$package")"; then
+            warn "Could not read APT policy for $package; skipping it."
+            UPGRADE_BLOCKED=1
+            continue
+        fi
+        candidate="$(awk '/^[[:space:]]*Candidate:/ && !found {value=$2; found=1} END {print value}' <<< "$policy")"
         if [[ -z "$candidate" || "$candidate" == '(none)' ]]; then
             warn "APT has no candidate for installed package $package; preserving it."
         elif dpkg --compare-versions "$candidate" gt "$installed"; then
