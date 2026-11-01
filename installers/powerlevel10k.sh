@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+if ! command -v zsh >/dev/null 2>&1; then
+    die 'Powerlevel10k requires Zsh; install the zsh component first.'
+    return 1
+fi
 if [[ ! -f "$HOME/powerlevel10k/powerlevel10k.zsh-theme" ]]; then
     if [[ -e "$HOME/powerlevel10k" ]]; then
         die "$HOME/powerlevel10k exists but does not look like a Powerlevel10k checkout."
