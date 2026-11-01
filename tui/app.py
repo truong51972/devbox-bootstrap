@@ -143,6 +143,7 @@ class DevboxTUI:
                 "selected-option": "fg:ansicyan bold",
             }),
         )
+        self.app.ttimeoutlen = 0.08  # Esc should feel immediate, not wait 0.5s.
         self._bind_choice(self.menu, self.open_menu, radio=True, home=True)
 
     def _bind_choice(self, widget, on_enter, *, radio=False, home=False, selector=False, confirm=False) -> None:
