@@ -42,7 +42,7 @@ COMPONENTS = (
 FINISHED_STATES = {"INSTALLED", "CONFIGURED", "UPDATED", "UP_TO_DATE", "SKIPPED", "FAILED", "PLANNED"}
 
 
-def build_command(action: str, selected: list[str]) -> list[str]:
+def build_command(action: str, selected: list[str], *, dry_run: bool = False) -> list[str]:
     """Construct a backend command without a shell or user-controlled syntax."""
     if action == "update":
         return ["bash", str(ROOT / "bin" / "devbox"), "--update"]
@@ -56,6 +56,8 @@ def build_command(action: str, selected: list[str]) -> list[str]:
     cmd = ["bash", str(ROOT / "setup-ubuntu.sh")]
     if action == "upgrade":
         cmd.append("--upgrade")
+    if dry_run:
+        cmd.append("--dry-run")
     cmd.extend(["--only", ",".join(selected)])
     return cmd
 
@@ -98,6 +100,7 @@ class DevboxTUI:
         self.status: dict[str, str] = {code: "--" for code, _ in COMPONENTS}
         self.message = "Select components with Space, then choose Install or Upgrade."
         self.busy = False
+        self.dry_run = False
         self.current_action = ""
         self.process: asyncio.subprocess.Process | None = None
         self.log_path: Path | None = None
@@ -120,7 +123,9 @@ class DevboxTUI:
             Button("Install", handler=lambda: self.start("install"), width=12),
             Button("Upgrade", handler=lambda: self.start("upgrade"), width=12),
         ]
+        self.preview_button = Button("Dry-run OFF", handler=self.toggle_dry_run, width=16)
         more_buttons = [
+            self.preview_button,
             Button("Update code", handler=lambda: self.start("update"), width=15),
             Button("Full log", handler=self.show_full_log, width=12),
             Button("Quit", handler=self.quit, width=10),
@@ -181,13 +186,21 @@ class DevboxTUI:
         self.message = message
         self.app.invalidate()
 
+    def toggle_dry_run(self) -> None:
+        if self.busy:
+            self._notice("Dry-run cannot change while an operation is running.")
+            return
+        self.dry_run = not self.dry_run
+        self.preview_button.text = "Dry-run ON" if self.dry_run else "Dry-run OFF"
+        self._notice("Dry-run ON: selected install/upgrade steps will be previewed." if self.dry_run else "Dry-run OFF: selected steps will execute.")
+
     def start(self, action: str) -> None:
         if self.busy:
             self._notice("A task is already running; please finish it first.")
             return
         chosen = list(self.selector.current_values)
         try:
-            cmd = build_command(action, chosen)
+            cmd = build_command(action, chosen, dry_run=self.dry_run)
         except ValueError as exc:
             self._notice(str(exc))
             return
@@ -226,10 +239,10 @@ class DevboxTUI:
         self.status = {code: "--" for code, _ in COMPONENTS}
         for item in selected:
             self.status[item] = "QUEUED"
-        self._notice(f"Preparing {action}...")
+        self._notice(f"Preparing {action}{" (dry-run)" if self.dry_run and action in {"install", "upgrade"} else ""}...")
         keepalive: asyncio.Task[None] | None = None
         try:
-            if action in {"install", "upgrade"}:
+            if action in {"install", "upgrade"} and not self.dry_run:
                 if not await self._authorize_sudo():
                     return
                 keepalive = asyncio.create_task(self._sudo_keepalive())
