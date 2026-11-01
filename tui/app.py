@@ -248,12 +248,25 @@ class DevboxTUI:
         )
 
     def _make_log_list(self, paths: list[Path]) -> KeyboardList:
+        entries = []
+        for path in paths:
+            parts = path.stem.split("-", 3)
+            if len(parts) >= 3 and len(parts[0]) == 8 and len(parts[1]) == 6:
+                date = parts[0]
+                hour = parts[1]
+                title = (f"{parts[2].title():<12} "
+                         f"{date[:4]}-{date[4:6]}-{date[6:]} "
+                         f"{hour[:2]}:{hour[2:4]} UTC")
+            else:
+                title = path.name
+            entries.append(Entry(str(path), title, description=str(path)))
         return KeyboardList(
-            [Entry(str(p), p.name, "", description=str(p)) for p in paths],
+            entries,
             on_enter=self.open_history,
             on_back=self.back,
             on_help=self._show_help,
             on_change=self._invalidate,
+            on_filter=self._begin_filter,
             get_columns=self.columns,
         )
 
@@ -316,8 +329,11 @@ class DevboxTUI:
             "l View log   Enter Home   Esc Home   ? Help",
         )
         self.views["logs"] = self._page(
-            "History", DynamicContainer(self._logs_layout),
-            "↑↓/j/k Browse   Enter View log   Esc Back",
+            "History", HSplit([
+                DynamicContainer(self._logs_layout),
+                DynamicContainer(lambda: self._filter_layout()),
+            ]),
+            "↑↓/j/k Browse   / Filter   Enter View log   Esc Back",
         )
         self.views["view_log"] = self._page(
             "Log viewer", self.history_view,
@@ -486,10 +502,18 @@ class DevboxTUI:
         item = self.log_files.current
         if item is None:
             return [("class:muted", "  No logs found.")]
+        path = Path(item.key)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
         return [
             ("class:section", "  SELECTED RUN\n\n"),
             ("class:title", "  " + item.label + "\n\n"),
-            ("class:muted", "  Enter to open this log."),
+            ("class:muted", f"  Size: {size:,} bytes\n"),
+            ("class:muted", "  " + str(path) + "\n\n"),
+            ("class:section", "  LAST OUTPUT\n"),
+            ("class:body", "  " + log_tail(path, count=5).replace("\n", "\n  ")),
         ]
 
     def _show_component_info(self) -> None:
@@ -498,22 +522,26 @@ class DevboxTUI:
 
     def _begin_filter(self) -> None:
         self.filter_active = True
+        self.filter_input.text = ""
         self.app.layout.focus(self.filter_input)
-        self._notice("Filter by name, group or description. Enter to return.")
+        self._notice("Filter by name or description. Enter to return to the list.")
         self._invalidate()
 
+    def _active_list(self) -> KeyboardList:
+        return self.log_files if self.screen == "logs" else self.selector
+
     def _filter_changed(self, _buffer) -> None:
-        self.selector.set_query(self.filter_input.text)
+        self._active_list().set_query(self.filter_input.text)
 
     def _finish_filter(self) -> bool:
         self.filter_active = False
-        self.app.layout.focus(self.selector.window)
-        self._notice("Filtered selection. Esc returns to the main menu.")
+        self.app.layout.focus(self._active_list().window)
+        self._notice("Filtered list. Esc returns to the previous screen.")
         return True
 
     def _cancel_filter(self) -> None:
         self.filter_input.text = ""
-        self.selector.set_query("")
+        self._active_list().set_query("")
         self._finish_filter()
 
     def _bind_filter(self) -> None:
@@ -843,6 +871,8 @@ class DevboxTUI:
         log_dir = STATE_ROOT / "logs"
         paths = sorted(log_dir.glob("*.log"), reverse=True)[:100] if log_dir.exists() else []
         self.log_files = self._make_log_list(paths)
+        self.filter_active = False
+        self.filter_input.text = ""
         self._notice(f"{len(paths)} recent run log(s).")
         self.navigate("logs", self.log_files.window)
 
@@ -896,7 +926,7 @@ class DevboxTUI:
             self.navigate("select", self.selector.window) if self.action != "update" else self.navigate("home", self.menu.window)
         elif self.screen == "info":
             self.navigate("select", self.selector.window)
-        elif self.screen == "select" and self.filter_active:
+        elif self.screen in ("select", "logs") and self.filter_active:
             self._cancel_filter()
         elif self.screen in ("select", "result", "logs"):
             self.navigate("home", self.menu.window)
