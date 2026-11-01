@@ -8,7 +8,7 @@ case "${BOOTSTRAP_TARGET_SHELL:-${SHELL##*/}}" in
         append_if_not_exists_in_script '# devbox: direnv shell hook' \
             'if command -v direnv >/dev/null 2>&1; then
   eval "$(direnv hook zsh)"
-fi' "$HOME/.zshrc"
+fi' "$(zsh_rc_file)"
         ;;
     bash)
         append_if_not_exists_in_script '# devbox: direnv shell hook' \
