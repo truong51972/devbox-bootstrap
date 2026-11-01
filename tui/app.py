@@ -248,6 +248,8 @@ class DevboxTUI:
         return KeyboardList(
             entries,
             multiple=True,
+            bulk_select=False,  # Never bulk-consent to root group/key changes.
+            empty_text="No optional changes required.",
             on_enter=self.execute_selection,
             on_back=self.back,
             on_help=self._show_help,
@@ -271,6 +273,7 @@ class DevboxTUI:
             entries.append(Entry(str(path), title, description=str(path)))
         return KeyboardList(
             entries,
+            empty_text="No saved logs found.",
             on_enter=self.open_history,
             on_back=self.back,
             on_help=self._show_help,
