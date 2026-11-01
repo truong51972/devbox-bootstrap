@@ -85,7 +85,9 @@ update_code() {
     # Only fast-forward: never reset local source or force overwrite user edits.
     git -C "$root" fetch --no-tags origin main
     git -C "$root" merge --ff-only FETCH_HEAD
-    setup_runtime
+    # Run the runtime bootstrap from the freshly updated launcher, rather than
+    # reusing a function loaded from an older script before the Git update.
+    bash "$root/bin/devbox" --setup-runtime
     printf 'Devbox code is current: %s\n' "$(git -C "$root" rev-parse --short HEAD)"
     echo 'Restart the TUI to load updated Python code.'
 }
