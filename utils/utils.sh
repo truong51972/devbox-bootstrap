@@ -59,6 +59,19 @@ append_if_not_exists_in_script() {
     if [[ -f "$file" ]] && grep -Fqx -- "$marker" "$file"; then
         return 0
     fi
+    # Older versions used different markers for these same integrations.
+    # Preserve their contents and report them instead of duplicating shell hooks.
+    if [[ -f "$file" ]]; then
+        local old_marker=''
+        case "$marker" in
+            '# Zoxide setup') old_marker='# Zoxide setup for auto directory jumping' ;;
+            '# kubectl completion and shortcut') old_marker='# For kubectl command auto-completion and alias' ;;
+        esac
+        if [[ -n "$old_marker" ]] && grep -Fqx -- "$old_marker" "$file"; then
+            warn "Legacy shell integration detected ($old_marker). Skipping duplicate; review $file manually."
+            return 0
+        fi
+    fi
     backup_shell_file "$file" || return 1
     touch "$file"
     printf '\n%s\n%s\n' "$marker" "$content" >> "$file"
