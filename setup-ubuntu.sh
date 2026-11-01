@@ -46,7 +46,6 @@ if [ "$install_zsh" = "y" ] || [ "$install_zsh" = "Y" ]; then
     source installers/powerlevel10k.sh
 fi
 
-source installers/auto_direct_dir.sh
 source installers/keychain.sh
 source installers/python.sh
 
