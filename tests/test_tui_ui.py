@@ -104,6 +104,102 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual(len(app.log_files.visible), 1)
             self.assertIn("Install", app.log_files.current.label)
 
+    def test_bulk_select_preserves_other_filtered_selections(self):
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        async def scenario():
+            with create_pipe_input() as pipe:
+                with create_app_session(input=pipe, output=DummyOutput()):
+                    app = DevboxTUI()
+                    task = asyncio.create_task(app.app.run_async())
+                    try:
+                        await asyncio.sleep(0.10)
+                        pipe.send_text("\r")
+                        await asyncio.sleep(0.10)
+                        app.selector.current_values = ["uv"]
+                        app.selector.set_query("docker")
+                        self.assertEqual([x.key for x in app.selector.visible], ["docker"])
+                        pipe.send_text("a")
+                        await asyncio.sleep(0.12)
+                        self.assertEqual(app.selector.current_values, ["uv", "docker"])
+                        app.selector.set_query("no-matching-tool")
+                        pipe.send_text("a")  # An empty filter must not remove hidden items.
+                        await asyncio.sleep(0.10)
+                        self.assertEqual(app.selector.current_values, ["uv", "docker"])
+                    finally:
+                        if not task.done():
+                            app.app.exit()
+                            await asyncio.wait_for(task, 2)
+        asyncio.run(scenario())
+
+    def test_privileged_options_cannot_be_bulk_selected(self):
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        async def scenario():
+            with create_pipe_input() as pipe:
+                with create_app_session(input=pipe, output=DummyOutput()):
+                    app = DevboxTUI()
+                    task = asyncio.create_task(app.app.run_async())
+                    try:
+                        await asyncio.sleep(0.10)
+                        pipe.send_text("\r")
+                        await asyncio.sleep(0.10)
+                        app.selector.current_values = ["zsh", "docker", "keychain"]
+                        pipe.send_text("\r")
+                        await asyncio.sleep(0.10)
+                        self.assertEqual(app.screen, "confirm")
+                        self.assertEqual(len(app.options.entries), 3)
+                        pipe.send_text("a")  # No bulk approval on Confirm.
+                        await asyncio.sleep(0.10)
+                        self.assertFalse(app.options.current_values)
+                        pipe.send_text(" ")
+                        await asyncio.sleep(0.10)
+                        self.assertEqual(len(app.options.current_values), 1)
+                        pipe.send_text("n")  # No implicit clear/approval.
+                        await asyncio.sleep(0.10)
+                        self.assertEqual(len(app.options.current_values), 1)
+                    finally:
+                        if not task.done():
+                            app.app.exit()
+                            await asyncio.wait_for(task, 2)
+        asyncio.run(scenario())
+
+    def test_compact_footer_is_readable(self):
+        app = DevboxTUI()
+        for width in (58, 80, 120):
+            app.columns = lambda w=width: w
+            for screen in ("home", "select", "confirm", "run", "result", "logs"):
+                with self.subTest(width=width, screen=screen):
+                    page = app.views[screen]
+                    footer_control = page.children[-1].content
+                    segments = footer_control.text()
+                    output = "".join(text for _, text in segments)
+                    self.assertLessEqual(len(output), width - 2)
+                    self.assertTrue(output.strip())
+
+    def test_history_preview_is_cached_until_log_changes(self):
+        from tui.app import _cached_log_tail
+        with TemporaryDirectory() as tmp, patch("tui.app.STATE_ROOT", Path(tmp)):
+            logs = Path(tmp) / "logs"
+            logs.mkdir()
+            path = logs / "20261101-111020-doctor-test.log"
+            path.write_text("first\n")
+            app = DevboxTUI()
+            app.list_history()
+            _cached_log_tail.cache_clear()
+            with patch("tui.app.log_tail", wraps=__import__(
+                    "tui.backend", fromlist=["log_tail"]).log_tail) as read:
+                app._history_details()
+                app._history_details()
+                self.assertEqual(read.call_count, 1)
+                path.write_text("second version\n")
+                app._history_details()
+                self.assertEqual(read.call_count, 2)
+
     def test_compact_info_and_keyboard_search(self):
         async def scenario():
             with create_pipe_input() as pipe:
