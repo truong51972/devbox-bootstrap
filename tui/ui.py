@@ -77,6 +77,7 @@ class KeyboardList:
         on_filter: Callable[[], None] | None = None,
         on_quit: Callable[[], None] | None = None,
         on_dry: Callable[[], None] | None = None,
+        on_details: Callable[[], None] | None = None,
     ) -> None:
         self.entries = list(entries)
         self.multiple = multiple
@@ -134,6 +135,11 @@ class KeyboardList:
             @kb.add("/")
             def _filter(_event) -> None:
                 on_filter()
+
+        if on_details:
+            @kb.add("i")
+            def _details(_event) -> None:
+                on_details()
 
         if multiple:
             @kb.add("a")
