@@ -13,7 +13,7 @@ case "${BOOTSTRAP_TARGET_SHELL:-${SHELL##*/}}" in
     [[ -r /usr/share/doc/fzf/examples/key-bindings.zsh ]] && source /usr/share/doc/fzf/examples/key-bindings.zsh
     [[ -r /usr/share/doc/fzf/examples/completion.zsh ]] && source /usr/share/doc/fzf/examples/completion.zsh
   fi
-fi' "$HOME/.zshrc"
+fi' "$(zsh_rc_file)"
         ;;
     bash)
         append_if_not_exists_in_script '# devbox: fzf shell integration' \
