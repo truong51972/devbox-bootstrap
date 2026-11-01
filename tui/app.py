@@ -146,6 +146,38 @@ class DevboxTUI:
         )
         self.app.ttimeoutlen = 0.08  # Esc should feel immediate, not wait 0.5s.
         self._bind_choice(self.menu, self.open_menu, radio=True, home=True)
+        self._bind_text(self.results_view, result=True)
+        self._bind_text(self.history_view, log_viewer=True)
+        self._bind_text(self.help_view)
+        self._bind_text(self.status_view)
+
+    def _bind_text(self, widget, *, result=False, log_viewer=False) -> None:
+        """TextArea buffer keymaps otherwise absorb result/log shortcuts."""
+        kb = KeyBindings()
+
+        @kb.add("escape")
+        def _back(_event):
+            self.back()
+
+        @kb.add("c-q")
+        def _quit(_event):
+            self.quit()
+
+        if result:
+            @kb.add("enter")
+            def _home(_event):
+                self.navigate("home", self.menu)
+
+            @kb.add("l")
+            def _log(_event):
+                self.show_full_log()
+
+        if log_viewer:
+            @kb.add("o")
+            def _pager(_event):
+                asyncio.create_task(self._external_pager())
+
+        widget.control.key_bindings = kb
 
     def _bind_choice(self, widget, on_enter, *, radio=False, home=False, selector=False, confirm=False) -> None:
         """List controls capture Enter and Keys.Any before application bindings."""
