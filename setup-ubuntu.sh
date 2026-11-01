@@ -100,7 +100,7 @@ if [[ -z "$SCRIPT_DIR" || ! -f "$SCRIPT_DIR/utils/utils.sh" ]]; then
     temp_dir="$(mktemp -d /tmp/devbox-bootstrap.XXXXXX)"
     trap 'rm -rf -- "$temp_dir"' EXIT
     git clone --depth 1 https://github.com/truong51972/devbox-bootstrap.git "$temp_dir"
-    if [[ -t 0 || -n "$ONLY_COMPONENTS" ]] || (( PREFLIGHT_ONLY || DOCTOR_ONLY )); then
+    if [[ -t 0 || -n "$ONLY_COMPONENTS" ]] || (( PREFLIGHT_ONLY || DOCTOR_ONLY || UPGRADE_ONLY )); then
         # Targeted/preflight modes do not require a terminal for component selection.
         bash "$temp_dir/setup-ubuntu.sh" "${original_args[@]}"
     elif [[ -r /dev/tty ]]; then
