@@ -10,6 +10,7 @@ Options:
   -h, --help                 Show this help
   --preflight                Inspect environment without modifying anything
   --doctor                   Check installed tools, shell hooks and runtime health
+  --upgrade                  Upgrade installed tools only (explicit opt-in)
   --dry-run                  Show selected operations without installing anything
   --only ITEMS               Comma-separated components, no component selection prompts
   --kubectl-version VERSION  Pin kubectl to a release such as v1.35.1
@@ -21,6 +22,7 @@ Components:
 
 Examples:
   bash setup-ubuntu.sh --preflight
+  bash setup-ubuntu.sh --upgrade --only fzf,ripgrep,bat-fd,direnv
   bash setup-ubuntu.sh --dry-run --only fzf,ripgrep,bat-fd,direnv
   bash setup-ubuntu.sh --only kubectl --kubectl-version v1.35.1
 HELP
@@ -31,6 +33,7 @@ ONLY_COMPONENTS=''
 BOOTSTRAP_DRY_RUN=0
 PREFLIGHT_ONLY=0
 DOCTOR_ONLY=0
+UPGRADE_ONLY=0
 BOOTSTRAP_KUBECTL_VERSION=''
 while (( $# > 0 )); do
     case "$1" in
@@ -38,6 +41,7 @@ while (( $# > 0 )); do
         --dry-run) BOOTSTRAP_DRY_RUN=1; shift ;;
         --preflight) PREFLIGHT_ONLY=1; shift ;;
         --doctor) DOCTOR_ONLY=1; shift ;;
+        --upgrade) UPGRADE_ONLY=1; shift ;;
         --only|--kubectl-version)
             key="$1"
             if (( $# < 2 )) || [[ -z "$2" ]]; then
@@ -67,6 +71,10 @@ if [[ -n "$ONLY_COMPONENTS" ]]; then
             *) printf 'Unknown component: %s\n' "$component" >&2; exit 2 ;;
         esac
     done
+fi
+if (( UPGRADE_ONLY && (PREFLIGHT_ONLY || DOCTOR_ONLY) )); then
+    echo '--upgrade cannot be combined with --preflight or --doctor.' >&2
+    exit 2
 fi
 export BOOTSTRAP_KUBECTL_VERSION BOOTSTRAP_DRY_RUN
 
@@ -111,6 +119,18 @@ if (( DOCTOR_ONLY )); then
     # shellcheck source=utils/doctor.sh
     source "$SCRIPT_DIR/utils/doctor.sh"
     doctor_main
+    exit $?
+fi
+if (( UPGRADE_ONLY )); then
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    if [[ "${ID:-}" != ubuntu ]]; then
+        die 'Upgrading installed tools currently supports Ubuntu only.'
+        exit 1
+    fi
+    # shellcheck source=utils/upgrade.sh
+    source "$SCRIPT_DIR/utils/upgrade.sh"
+    upgrade_main
     exit $?
 fi
 
