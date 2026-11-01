@@ -21,7 +21,9 @@ sudo nvidia-ctk runtime configure --runtime=docker
 if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet docker; then
     sudo systemctl restart docker
 elif command -v service >/dev/null 2>&1; then
-    sudo service docker restart
+    if ! sudo service docker restart; then
+        warn 'Docker could not be restarted automatically; restart the daemon manually.'
+    fi
 else
     warn 'Restart Docker manually to apply the NVIDIA runtime configuration.'
 fi
