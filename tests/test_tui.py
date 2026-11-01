@@ -18,6 +18,7 @@ class TUIBasicTests(unittest.TestCase):
         )
         self.assertEqual(build_command("doctor", []), ["bash", str(ROOT / "setup-ubuntu.sh"), "--doctor"])
         self.assertEqual(build_command("preflight", []), ["bash", str(ROOT / "setup-ubuntu.sh"), "--preflight"])
+        self.assertEqual(build_command("upgrade", ["fzf"], dry_run=True), ["bash", str(ROOT / "setup-ubuntu.sh"), "--upgrade", "--dry-run", "--only", "fzf"])
         self.assertEqual(build_command("update", []), ["bash", str(ROOT / "bin" / "devbox"), "--update"])
 
     def test_invalid_command_and_selection(self):
