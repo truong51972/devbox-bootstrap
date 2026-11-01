@@ -140,6 +140,12 @@ upgrade_uv() {
     fi
 }
 
+# Tolerate transient TCP resets and GitHub throttling without retrying
+# checksum mismatches (which must still fail before replacing a binary).
+upgrade_fetch() {
+    curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 10 "$@"
+}
+
 upgrade_binary() {
     local name="$1" target_version="$2" url="$3" current_version="$4"
     local dir
@@ -173,8 +179,8 @@ upgrade_binary() {
     (
         set -Eeuo pipefail
         trap 'rm -rf -- "$dir"' EXIT
-        curl -fsSL "$url" -o "$dir/$name"
-        curl -fsSL "${url}.sha256" -o "$dir/$name.sha256"
+        upgrade_fetch --max-time 300 "$url" -o "$dir/$name"
+        upgrade_fetch --max-time 30 "${url}.sha256" -o "$dir/$name.sha256"
         printf '%s  %s\n' "$(cat "$dir/$name.sha256")" "$dir/$name" | sha256sum --check --status
         sudo install -o root -g root -m 0755 "$dir/$name" "/usr/local/bin/$name"
     )
@@ -219,7 +225,7 @@ upgrade_minikube() {
         return 0
     fi
     command -v curl >/dev/null 2>&1 || { die 'curl required to upgrade Minikube'; return 1; }
-    response="$(curl -fsSL --connect-timeout 10 --max-time 30 https://api.github.com/repos/kubernetes/minikube/releases/latest)"
+    response="$(upgrade_fetch --max-time 30 https://api.github.com/repos/kubernetes/minikube/releases/latest)"
     latest="$(printf '%s\n' "$response" | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\(v[0-9][0-9.]*\)".*/\1/p')"
     [[ "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { die 'Could not parse latest Minikube release'; return 1; }
     installed="$(minikube version --short | grep -Eo '^v[0-9]+\.[0-9]+\.[0-9]+' || true)"
