@@ -9,11 +9,20 @@ upstream='https://github.com/truong51972/devbox-bootstrap.git'
 setup_runtime() {
     local python="$venv/bin/python" requirements="$root/tui/requirements.txt"
 
+    local uv_binary=''
     if command -v uv >/dev/null 2>&1; then
+        uv_binary="$(command -v uv)"
+    elif [[ -x "$HOME/.local/bin/uv" ]]; then
+        uv_binary="$HOME/.local/bin/uv"
+    elif [[ -x "$HOME/.cargo/bin/uv" ]]; then
+        uv_binary="$HOME/.cargo/bin/uv"
+    fi
+
+    if [[ -n "$uv_binary" ]]; then
         # uv can find Python or download a managed interpreter if absent.
-        echo '[devbox] Using uv for the isolated TUI environment.'
+        echo "[devbox] Using uv for the isolated TUI environment: $uv_binary"
         if [[ ! -x "$python" ]]; then
-            if ! uv venv "$venv"; then
+            if ! "$uv_binary" venv "$venv"; then
                 echo '[devbox] Could not create the virtual environment using uv.' >&2
                 return 1
             fi
@@ -22,7 +31,7 @@ setup_runtime() {
             echo "[devbox] uv did not create a usable interpreter: $python" >&2
             return 1
         fi
-        uv pip install --python "$python" -r "$requirements"
+        "$uv_binary" pip install --python "$python" -r "$requirements"
         return $?
     fi
 
