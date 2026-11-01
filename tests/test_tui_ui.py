@@ -200,6 +200,38 @@ class LayoutTests(unittest.TestCase):
                 app._history_details()
                 self.assertEqual(read.call_count, 2)
 
+    def test_layout_instances_remain_stable_between_redraws(self):
+        app = DevboxTUI()
+        app.columns = lambda: 120
+        app.rows = lambda: 35
+
+        home = app._home_layout()
+        selection = app._selection_layout()
+        logs = app._logs_layout()
+        run = app._run_layout()
+        self.assertIs(home, app._home_layout())
+        self.assertIs(selection, app._selection_layout())
+        self.assertIs(logs, app._logs_layout())
+        self.assertIs(run, app._run_layout())
+
+        app.open_menu()
+        refreshed_selection = app._selection_layout()
+        self.assertIsNot(selection, refreshed_selection)
+        self.assertIs(refreshed_selection.children[0], app.selector.window)
+
+        app.selector.current_values = ["zsh"]
+        old_confirm = app._confirm_layout()
+        app.confirm_selection()
+        new_confirm = app._confirm_layout()
+        self.assertIsNot(old_confirm, new_confirm)
+        self.assertIs(new_confirm.children[-1], app.options.window)
+
+        with TemporaryDirectory() as tmp, patch("tui.app.STATE_ROOT", Path(tmp)):
+            app.list_history()
+        refreshed_logs = app._logs_layout()
+        self.assertIsNot(logs, refreshed_logs)
+        self.assertIs(refreshed_logs.children[0], app.log_files.window)
+
     def test_compact_info_and_keyboard_search(self):
         async def scenario():
             with create_pipe_input() as pipe:
