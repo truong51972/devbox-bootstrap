@@ -200,6 +200,18 @@ class LayoutTests(unittest.TestCase):
                 app._history_details()
                 self.assertEqual(read.call_count, 2)
 
+    def test_idle_progress_poll_does_not_rewrite_unchanged_buffers(self):
+        app = DevboxTUI()
+        with patch.object(app, "_invalidate") as invalidate:
+            app._refresh()
+            first_status = app.status_view.text
+            first_log = app.log_view.text
+            initial_count = invalidate.call_count
+            app._refresh()
+            self.assertEqual(app.status_view.text, first_status)
+            self.assertEqual(app.log_view.text, first_log)
+            self.assertEqual(invalidate.call_count, initial_count)
+
     def test_layout_instances_remain_stable_between_redraws(self):
         app = DevboxTUI()
         app.columns = lambda: 120
