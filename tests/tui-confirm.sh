@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-repo_dir="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")/.." && pwd)"
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Unknown prompts and absent explicit consent MUST be declined.
 if DEVBOX_TUI_MODE=1 bash -c 'source "$1/utils/utils.sh"; confirm "change?" change_shell' bash "$repo_dir"; then
