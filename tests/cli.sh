@@ -42,4 +42,24 @@ output="$(bash "$repo_dir/setup-ubuntu.sh" --dry-run --only minikube)"
 [[ "$output" == *'installers/minikube.sh'* ]]
 [[ "$output" != *'installers/k8s.sh'* ]]
 
+# Exercise the same pipe-to-bash argument path as the README curl command.
+# Mock git clone to avoid network access; doctor must execute from the temp checkout.
+mkdir -p "$temp_bin/gitmock"
+export MOCK_SOURCE_REPO="$repo_dir"
+export MOCK_GIT_LOG="$temp_bin/git-invocations.log"
+cat > "$temp_bin/gitmock/git" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$MOCK_GIT_LOG"
+[[ "$1" == clone ]] || exit 2
+dest="${@: -1}"
+cp -a "$MOCK_SOURCE_REPO/." "$dest/"
+MOCK
+chmod +x "$temp_bin/gitmock/git"
+piped_status=0
+piped_output="$(cat "$repo_dir/setup-ubuntu.sh" | PATH="$temp_bin/gitmock:$temp_bin:$PATH" bash -s -- --doctor 2>&1)" || piped_status=$?
+[[ "$piped_status" -eq 1 ]]
+[[ "$piped_output" == *'Devbox Health Check'* ]]
+[[ "$piped_output" == *'daemon unreachable'* ]]
+grep -Fq 'clone --depth 1' "$MOCK_GIT_LOG"
+
 printf 'CLI tests passed.\n'

@@ -8,6 +8,16 @@ A small, interactive bootstrap for **Ubuntu** developer machines and Ubuntu on W
 curl -fsSL https://raw.githubusercontent.com/truong51972/devbox-bootstrap/main/setup-ubuntu.sh | bash
 ```
 
+### Quick Doctor (no installation)
+
+Check your current developer environment without cloning the repo manually:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/truong51972/devbox-bootstrap/main/setup-ubuntu.sh | bash -s -- --doctor
+```
+
+This downloads the bootstrap and uses a temporary checkout to run the read-only Doctor. It does **not** install packages, change shell configuration, or pull Docker images. It requires Git and network access; the command may exit nonzero when installed components have functional issues. As with any `curl | bash` command, only run code from a source you trust.
+
 Alternatively, review the scripts locally before running them:
 
 ```bash
