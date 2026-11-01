@@ -18,6 +18,28 @@ curl -fsSL https://raw.githubusercontent.com/truong51972/devbox-bootstrap/main/s
 
 This downloads the bootstrap and uses a temporary checkout to run the read-only Doctor. It does **not** install packages, change shell configuration, or pull Docker images. It requires Git and network access; the command may exit nonzero when installed components have functional issues. As with any `curl | bash` command, only run code from a source you trust.
 
+### Upgrade existing tools (explicit opt-in)
+
+Update **only installed** Devbox components without upgrading the full Ubuntu system:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/truong51972/devbox-bootstrap/main/setup-ubuntu.sh | bash -s -- --upgrade
+```
+
+Preview or restrict the upgrade to particular tools:
+
+```bash
+bash setup-ubuntu.sh --upgrade --dry-run
+bash setup-ubuntu.sh --upgrade --only fzf,ripgrep,bat-fd,direnv
+curl -fsSL https://raw.githubusercontent.com/truong51972/devbox-bootstrap/main/setup-ubuntu.sh | bash -s -- --upgrade --only uv,fzf
+```
+
+- APT-managed tools are updated to the **newest version available in configured APT repositories**, using `apt-get install --only-upgrade` (never `apt upgrade` for the whole machine). `sudo` may ask for a password; Docker package updates may restart its service.
+- Standalone `uv` uses `uv self update` with shell-profile modification disabled. Other uv distributions (pip, pipx, Cargo) must be updated using their original manager.
+- Devbox-managed Powerlevel10k, Oh My Zsh and autosuggestions Git checkouts update only when their tracked files are clean and their remotes match the expected upstream. Existing personal shell configuration is preserved.
+- Devbox-managed `kubectl` and `minikube` binaries under `/usr/local/bin` can upgrade to newer versions only after SHA-256 verification; externally managed versions are preserved. For Kubernetes clusters, pin `kubectl` with `--kubectl-version vMAJOR.MINOR.PATCH` to respect client/server version compatibility.
+- `--doctor` remains **read-only**; `--upgrade` must be explicitly requested. Missing tools are **skipped**, not installed. `--dry-run` previews checks without fetching package indexes, releases or changing files.
+
 Alternatively, review the scripts locally before running them:
 
 ```bash
@@ -87,6 +109,8 @@ bash tests/smoke.sh
 bash tests/cli.sh
 bash tests/config.sh
 bash tests/docker.sh
+bash tests/hardening.sh
+bash tests/upgrade.sh
 ```
 
 CI also runs ShellCheck. Tests do not perform real package installations.
