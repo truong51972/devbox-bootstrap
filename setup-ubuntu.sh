@@ -243,7 +243,6 @@ run_component() {
                 if ! command -v zsh >/dev/null 2>&1; then
                     warn 'Skipping Powerlevel10k: Zsh is not installed.'
                     COMPONENT_STATUS["$component"]=SKIPPED
-            devbox_event "$component" SKIPPED
                     devbox_event "$component" SKIPPED
                     COMPONENT_ORDER+=("$component")
                     return 0
@@ -252,7 +251,6 @@ run_component() {
                 if ! command -v docker >/dev/null 2>&1; then
                     warn 'Skipping NVIDIA Toolkit: Docker is not installed.'
                     COMPONENT_STATUS["$component"]=SKIPPED
-            devbox_event "$component" SKIPPED
                     devbox_event "$component" SKIPPED
                     COMPONENT_ORDER+=("$component")
                     return 0
