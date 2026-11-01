@@ -17,7 +17,7 @@ if [ ! -f "utils/utils.sh" ]; then
 
     # Clone the repository
     echo "Cloning setup repository..."
-    git clone --depth 1 https://github.com/truong51972/scripts.git "$TEMP_DIR"
+    git clone --depth 1 https://github.com/truong51972/devbox-bootstrap.git "$TEMP_DIR"
 
     # Run the setup script in the cloned directory
     echo "Running setup script..."
