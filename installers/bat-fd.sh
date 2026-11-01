@@ -17,5 +17,5 @@ if ! command -v fd >/dev/null 2>&1 && command -v fdfind >/dev/null 2>&1; then
     fi
 fi
 if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-    warn '~/.local/bin is not on PATH. Log in again or add it to PATH to use the new commands.'
+    warn "$HOME/.local/bin is not on PATH. Log in again or add it to PATH to use the new commands."
 fi

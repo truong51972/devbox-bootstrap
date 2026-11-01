@@ -2,6 +2,19 @@
 if dpkg-query -W -f='${Status}' docker-ce 2>/dev/null | grep -q 'install ok installed'; then
     log 'Docker Engine (docker-ce) is already installed.'
 else
+    # Docker's official packages conflict with distro Docker/containerd packages.
+    # Never uninstall existing software automatically; give the user a safe next step.
+    conflict_packages=()
+    for package in docker.io docker-compose docker-compose-v2 docker-doc docker-buildx podman-docker containerd runc; do
+        if dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed'; then
+            conflict_packages+=("$package")
+        fi
+    done
+    if (( ${#conflict_packages[@]} > 0 )); then
+        warn "Conflicting Docker packages detected: ${conflict_packages[*]}"
+        die 'Review the Docker Ubuntu install documentation and remove conflicts manually before installing docker-ce. No packages were removed.'
+        return 1
+    fi
     sudo apt-get install -y ca-certificates curl
     sudo install -m 0755 -d /etc/apt/keyrings
     sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc

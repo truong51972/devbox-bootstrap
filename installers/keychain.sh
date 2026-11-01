@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 key_file=''
+sudo apt-get install -y keychain
 if [[ -f "$HOME/.ssh/git" ]]; then
     key_file="$HOME/.ssh/git"
 elif [[ -f "$HOME/.ssh/id_ed25519" ]]; then
@@ -13,7 +14,6 @@ fi
 if [[ -z "$key_file" ]]; then
     warn 'No SSH private key selected; skipping keychain.'
 else
-    sudo apt-get install -y keychain
     key_ref="\$HOME/.ssh/${key_file##*/}"
     append_if_not_exists_in_script '# Keychain setup' \
         "eval \"\$(keychain --quiet --eval --agents ssh \"$key_ref\")\""

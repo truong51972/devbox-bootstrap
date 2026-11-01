@@ -1,5 +1,24 @@
 #!/usr/bin/env bash
-if ! command -v kubectl >/dev/null 2>&1; then
+# Optional version pin for compatibility with an existing Kubernetes control plane.
+requested_version="${BOOTSTRAP_KUBECTL_VERSION:-}"
+install_kubectl=true
+if command -v kubectl >/dev/null 2>&1; then
+    if [[ -z "$requested_version" ]]; then
+        install_kubectl=false
+        log 'kubectl already installed; no version pin requested, skipping replacement.'
+    else
+        existing_version="$(kubectl version --client -o json 2>/dev/null | grep -Eo '"gitVersion"[[:space:]]*:[[:space:]]*"v[0-9]+\.[0-9]+\.[0-9]+"' | head -1 || true)"
+        if [[ "$existing_version" == *"\"$requested_version\"" ]]; then
+            install_kubectl=false
+            log "kubectl $requested_version is already installed."
+        elif ! confirm "kubectl exists with a different version; replace it with $requested_version?"; then
+            die 'kubectl version selection cancelled; existing binary was preserved.'
+            return 1
+        fi
+    fi
+fi
+
+if [[ "$install_kubectl" == true ]]; then
     architecture="$(dpkg --print-architecture)"
     case "$architecture" in
         amd64|arm64) ;;
@@ -8,15 +27,13 @@ if ! command -v kubectl >/dev/null 2>&1; then
     ( set -Eeuo pipefail
       temp_dir="$(mktemp -d)"
       trap 'rm -rf -- "$temp_dir"' EXIT
-      version="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"
+      version="${requested_version:-$(curl -fsSL https://dl.k8s.io/release/stable.txt)}"
       download_url="https://dl.k8s.io/release/${version}/bin/linux/${architecture}/kubectl"
       curl -fsSL "$download_url" -o "$temp_dir/kubectl"
       curl -fsSL "${download_url}.sha256" -o "$temp_dir/kubectl.sha256"
       printf '%s  %s\n' "$(cat "$temp_dir/kubectl.sha256")" "$temp_dir/kubectl" | sha256sum --check --status
       sudo install -o root -g root -m 0755 "$temp_dir/kubectl" /usr/local/bin/kubectl
     )
-else
-    log 'kubectl already installed; skipping binary download.'
 fi
 
 case "${BOOTSTRAP_TARGET_SHELL:-${SHELL##*/}}" in
