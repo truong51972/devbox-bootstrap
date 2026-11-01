@@ -27,6 +27,7 @@ jobs:
           bash tests/tui-launcher.sh
           bash tests/tui-runtime.sh
           bash tests/tui-events.sh
+          bash tests/tui-confirm.sh
       - name: Test Python TUI
         run: |
           python3 -m venv "$RUNNER_TEMP/devbox-tui-venv"
