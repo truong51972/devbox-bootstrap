@@ -32,7 +32,7 @@ class TUIBasicTests(unittest.TestCase):
     def test_application_constructs_and_preview_toggle(self):
         app = DevboxTUI()
         self.assertEqual(app.screen, "home")
-        self.assertFalse(app.app.mouse_support)
+        self.assertFalse(app.app.mouse_support())
         self.assertFalse(app.dry_run)
         self.assertFalse(app.busy)
         app.toggle_dry_run()
@@ -92,6 +92,46 @@ class TUIBasicTests(unittest.TestCase):
             app.start("preflight")
             task.assert_called_once()
             self.assertIn("already active", app.message)
+
+    def test_keyboard_only_navigation_in_live_terminal_session(self):
+        """Exercise the actual key bindings, not just screen methods."""
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        async def scenario():
+            with create_pipe_input() as input_pipe:
+                with create_app_session(input=input_pipe, output=DummyOutput()):
+                    app = DevboxTUI()
+                    run = asyncio.create_task(app.app.run_async())
+                    try:
+                        await asyncio.sleep(0.10)
+                        input_pipe.send_text("\r")
+                        await asyncio.sleep(0.10)
+                        self.assertEqual(app.screen, "select")
+                        input_pipe.send_text(" ")  # Toggle current checkbox.
+                        await asyncio.sleep(0.10)
+                        self.assertTrue(app.selector.current_values)
+                        input_pipe.send_text("\r")
+                        await asyncio.sleep(0.10)
+                        self.assertEqual(app.screen, "confirm")
+                        input_pipe.send_text("d")
+                        await asyncio.sleep(0.10)
+                        self.assertTrue(app.dry_run)
+                        input_pipe.send_text("\x1b")
+                        await asyncio.sleep(0.15)
+                        self.assertEqual(app.screen, "select")
+                        input_pipe.send_text("\x1b")
+                        await asyncio.sleep(0.15)
+                        self.assertEqual(app.screen, "home")
+                        input_pipe.send_text("q")
+                        await asyncio.wait_for(run, 2)
+                    finally:
+                        if not run.done():
+                            app.app.exit()
+                            await asyncio.wait_for(run, 2)
+
+        asyncio.run(scenario())
 
     def test_invalid_command_and_selection(self):
         for action, selected in [
