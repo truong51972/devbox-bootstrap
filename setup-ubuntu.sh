@@ -161,7 +161,15 @@ verify_component() {
         direnv) verify_binary "$component" direnv || return 1 ;;
         docker) verify_binary "$component" docker || return 1 ;;
         nvidia) verify_binary "$component" nvidia-ctk || return 1 ;;
-        kubectl) verify_binary "$component" kubectl || return 1 ;;
+        kubectl)
+            verify_binary "$component" kubectl || return 1
+            if [[ -n "$BOOTSTRAP_KUBECTL_VERSION" ]]; then
+                actual_version="$(kubectl version --client -o json 2>/dev/null | grep -Eo '"gitVersion"[[:space:]]*:[[:space:]]*"v[0-9]+\.[0-9]+\.[0-9]+"' | head -1 || true)"
+                if [[ "$actual_version" != *"\"$BOOTSTRAP_KUBECTL_VERSION\"" ]]; then
+                    die "kubectl version verification failed: expected $BOOTSTRAP_KUBECTL_VERSION."
+                    return 1
+                fi
+            fi ;;
         clean) return 0 ;;
         *) die "Internal error: unknown component $component"; return 1 ;;
     esac
