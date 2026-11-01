@@ -23,3 +23,4 @@ jobs:
           bash tests/docker.sh
           bash tests/hardening.sh
           bash tests/upgrade.sh
+          bash tests/upgrade-binary.sh
