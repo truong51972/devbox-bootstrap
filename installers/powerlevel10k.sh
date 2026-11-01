@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+sudo apt-get install -y git
 if ! command -v zsh >/dev/null 2>&1; then
     die 'Powerlevel10k requires Zsh; install the zsh component first.'
     return 1
