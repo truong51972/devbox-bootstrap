@@ -11,7 +11,24 @@ warn() { printf '[devbox] WARNING: %s\n' "$*" >&2; }
 die() { printf '[devbox] ERROR: %s\n' "$*" >&2; return 1; }
 
 confirm() {
-    local answer
+    local answer key="${2:-}" env_name=''
+    if [[ "${DEVBOX_TUI_MODE:-}" == 1 ]]; then
+        # TUI selections are explicit, default-no decisions. Never read from
+        # /dev/tty inside the managed installer subprocess.
+        case "$key" in
+            change_shell) env_name=DEVBOX_CONFIRM_CHANGE_SHELL ;;
+            docker_group) env_name=DEVBOX_CONFIRM_DOCKER_GROUP ;;
+            ssh_key) env_name=DEVBOX_CONFIRM_SSH_KEY ;;
+            kubectl_replace) env_name=DEVBOX_CONFIRM_KUBECTL_REPLACE ;;
+            *) warn "Unrecognized unattended confirmation: $1"; return 1 ;;
+        esac
+        if [[ "${!env_name:-no}" == yes ]]; then
+            log "Confirmed by Devbox TUI: $key"
+            return 0
+        fi
+        warn "Skipped optional change: $key"
+        return 1
+    fi
     if [[ ! -t 0 ]]; then
         warn "Skipping optional prompt without a TTY: $1"
         return 1

@@ -29,8 +29,12 @@ add_plugin_if_not_exists 'zsh-syntax-highlighting'
 zsh_path="$(command -v zsh)"
 if [[ "$(getent passwd "$USER" | cut -d: -f7)" != "$zsh_path" ]]; then
     log 'Changing the default login shell to Zsh.'
-    if confirm 'Change the default login shell to Zsh?'; then
-        chsh -s "$zsh_path"
+    if confirm 'Change the default login shell to Zsh?' change_shell; then
+        if [[ "${DEVBOX_TUI_MODE:-}" == 1 ]]; then
+            sudo chsh -s "$zsh_path" "$USER"
+        else
+            chsh -s "$zsh_path"
+        fi
     else
         warn "Default shell not changed; run 'chsh -s $zsh_path' manually if desired."
     fi
