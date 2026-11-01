@@ -34,22 +34,30 @@ If `~/.local/bin` is not in your `PATH`, use `~/.local/bin/devbox` directly.
 to overwrite tracked local edits or diverged Git history. Restart the TUI
 after updating source code.
 
-The keyboard-first TUI starts at a **main menu**. Install/Upgrade opens
-component selection, confirmation, execution progress and result screens.
-Doctor, Preflight, Update Devbox, and Logs & History are separate options.
-Mouse input is deliberately disabled.
+The keyboard-first TUI starts at a **minimal grouped menu**. Install/Upgrade
+opens a sectioned component list with a contextual details panel, then a
+compact confirmation, execution progress, and result screen. The layout adapts
+to wide and narrow terminals (with `i` for details in compact mode). Doctor,
+Preflight, Update Devbox and Logs & History remain separate choices.
+Mouse input is deliberately disabled. No new TUI dependencies are required.
 
 | Key | Context | Action |
 | --- | --- | --- |
 | Up/Down or j/k, Enter | Main menu | Navigate / open |
 | Space | Components / confirmation | Toggle selection |
-| A / N | Components | Select all / clear |
+| A / N | Components | Select filtered / clear all |
+| / | Components, History | Search/filter the visible list |
+| I | Components | Full details (useful in narrow terminals) |
+| T | Main menu | Toggle minimal color / monochrome theme |
 | D | Confirmation | Toggle dry-run |
-| Esc | Idle screens | Back |
-| L | Results | View saved log |
+| Esc | Idle screens | Back (or clear active filter) |
+| L | Execution, Results | Expand live log / open saved log |
 | O | Log viewer | Open external pager (if installed) |
 | ? | Most screens | Show keyboard help |
 | Q | Main menu | Quit |
+
+The default theme uses ANSI terminal colors. For monochrome terminals, set
+`DEVBOX_THEME=mono devbox`; `t` toggles themes for the current session.
 
 Only one job can run at a time. While it runs, the TUI keeps the log and
 progress visible and disables quitting/detaching. Sudo authentication is shown
