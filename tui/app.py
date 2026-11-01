@@ -239,7 +239,8 @@ class DevboxTUI:
         self.status = {code: "--" for code, _ in COMPONENTS}
         for item in selected:
             self.status[item] = "QUEUED"
-        self._notice(f"Preparing {action}{" (dry-run)" if self.dry_run and action in {"install", "upgrade"} else ""}...")
+        mode = " (dry-run)" if self.dry_run and action in {"install", "upgrade"} else ""
+        self._notice(f"Preparing {action}{mode}...")
         keepalive: asyncio.Task[None] | None = None
         try:
             if action in {"install", "upgrade"} and not self.dry_run:
