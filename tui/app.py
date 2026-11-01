@@ -57,6 +57,7 @@ class DevboxTUI:
     def __init__(self) -> None:
         self.screen = "home"
         self.previous_screen = "home"
+        self.help_return_screen = "home"
         self.action = ""
         self.current_action = ""
         self.selected: list[str] = []
@@ -78,7 +79,7 @@ class DevboxTUI:
         self.selector = self._make_selector()
         self.options = CheckboxList([("placeholder", "No additional options")])
         self.log_files = RadioList([("", "No history yet")])
-        self.status_view = TextArea(text="", read_only=True, focusable=False,
+        self.status_view = TextArea(text="", read_only=True, focusable=True,
                                     scrollbar=True, wrap_lines=False)
         self.log_view = TextArea(text="", read_only=True, focusable=False,
                                  scrollbar=True, wrap_lines=False)
@@ -211,7 +212,7 @@ class DevboxTUI:
 
         @kb.add("?", filter=Condition(lambda: self.screen != "help"))
         def _help(_event):
-            self.previous_screen = self.screen
+            self.help_return_screen = self.screen
             self.navigate("help", self.help_view)
 
         @kb.add("q", filter=is_screen("home"))
@@ -503,7 +504,7 @@ class DevboxTUI:
             self._notice("A job is running; leaving would orphan the installer.")
             return
         if self.screen == "help":
-            target = self.previous_screen
+            target = self.help_return_screen
             self.navigate(target, self._focus_for(target))
         elif self.screen == "view_log":
             target = self.previous_screen
