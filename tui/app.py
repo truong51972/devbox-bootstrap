@@ -6,12 +6,10 @@ subprocesses and append their unfiltered output to on-disk log files.
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 from datetime import datetime, timezone
 import os
 from pathlib import Path
 import shutil
-import signal
 import subprocess
 import tempfile
 
@@ -83,9 +81,10 @@ def read_events(path: Path | None, offset: int) -> tuple[list[tuple[str, str]], 
     events: list[tuple[str, str]] = []
     with path.open("rb") as stream:
         stream.seek(offset)
-        for line in stream:
-            if not line.endswith(b"\n"):
-                break
+        while True:
+            line = stream.readline()
+            if not line or not line.endswith(b"\n"):
+                break  # Wait for a complete event line before consuming it.
             fields = line.decode("utf-8", errors="replace").strip().split("\t")
             if len(fields) == 3 and fields[0] == "STATUS":
                 events.append((fields[1], fields[2]))
@@ -120,6 +119,8 @@ class DevboxTUI:
             Button("Preflight", handler=lambda: self.start("preflight"), width=12),
             Button("Install", handler=lambda: self.start("install"), width=12),
             Button("Upgrade", handler=lambda: self.start("upgrade"), width=12),
+        ]
+        more_buttons = [
             Button("Update code", handler=lambda: self.start("update"), width=15),
             Button("Full log", handler=self.show_full_log, width=12),
             Button("Quit", handler=self.quit, width=10),
@@ -149,6 +150,7 @@ class DevboxTUI:
                 ),
                 Frame(self.log_view, title="Recent output (full log saved to disk)", height=Dimension(weight=2, min=8)),
                 VSplit(buttons, padding=1),
+                VSplit(more_buttons, padding=1),
                 Label(lambda: f" {self.message}", style="class:footer"),
                 Label(" Tab: navigate | Space: select | F2: full log | Ctrl-Q: quit", style="class:hint"),
             ]
@@ -259,8 +261,7 @@ class DevboxTUI:
                 while self.process.returncode is None:
                     await asyncio.sleep(0.35)
                     self._refresh()
-                    if self.process.returncode is None:
-                        await self.process.wait() if self.process.returncode is not None else asyncio.sleep(0)
+
                 code = await self.process.wait()
             self._refresh()
             if code == 0:
