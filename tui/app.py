@@ -16,8 +16,7 @@ import tempfile
 from prompt_toolkit import Application
 from prompt_toolkit.application import in_terminal
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import HSplit, Layout, VSplit, Window
-from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout import HSplit, Layout, VSplit
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Button, CheckboxList, Frame, Label, TextArea
@@ -107,7 +106,10 @@ class DevboxTUI:
         self.event_path: Path | None = None
         self.event_offset = 0
 
-        self.status_view = FormattedTextControl(self._render_status)
+        self.status_view = TextArea(
+            text=self._render_status(), height=Dimension(min=5),
+            read_only=True, focusable=True, scrollbar=True, wrap_lines=False,
+        )
         self.log_view = TextArea(
             text="No job has run. Logs will appear here.",
             height=Dimension(preferred=11, min=5),
@@ -145,15 +147,15 @@ class DevboxTUI:
                     [
                         Frame(self.selector, title="Components [Space to select]", width=Dimension(weight=3)),
                         Frame(
-                            Window(content=self.status_view, wrap_lines=False, height=Dimension(min=13)),
+                            self.status_view,
                             title="Task status",
                             width=Dimension(weight=2),
                         ),
                     ],
                     padding=1,
-                    height=Dimension(weight=3, min=16),
+                    height=Dimension(weight=3, min=9),
                 ),
-                Frame(self.log_view, title="Recent output (full log saved to disk)", height=Dimension(weight=2, min=8)),
+                Frame(self.log_view, title="Recent output (full log saved to disk)", height=Dimension(weight=2, min=5)),
                 VSplit(buttons, padding=1),
                 VSplit(more_buttons, padding=1),
                 Label(lambda: f" {self.message}", style="class:footer"),
@@ -269,7 +271,6 @@ class DevboxTUI:
                     stdin=subprocess.DEVNULL,
                     stdout=log_stream,
                     stderr=subprocess.STDOUT,
-                    start_new_session=True,
                 )
                 self._notice(f"{action.title()} running; log: {self.log_path}")
                 while self.process.returncode is None:
@@ -306,6 +307,7 @@ class DevboxTUI:
             if name in self.status:
                 self.status[name] = state
         self.log_view.text = log_tail(self.log_path)
+        self.status_view.text = self._render_status()
         self.app.invalidate()
 
     def show_full_log(self) -> None:
