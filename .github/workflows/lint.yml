@@ -16,4 +16,8 @@ jobs:
       - name: ShellCheck
         run: find . -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -S warning -e SC1090,SC1091
       - name: Run smoke tests
-        run: bash tests/smoke.sh
+        run: |
+          bash tests/smoke.sh
+          bash tests/cli.sh
+          bash tests/config.sh
+          bash tests/docker.sh

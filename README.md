@@ -47,6 +47,48 @@ For Ubuntu versions that ship `batcat`/`fdfind`, the installer creates `~/.local
 - Installing Powerlevel10k requires a terminal with Nerd Font glyph support, such as [MesloLGS NF](https://github.com/romkatv/powerlevel10k#fonts). Existing themes/configuration are not migrated automatically.
 - The script is intended for personal developer workstations, **not** for fully unattended CI/provisioning. You can rerun it, but review prompts and changes before accepting; system-level installs and third-party installer scripts can still change your environment.
 
+
+## Inspect, preview, and select installs
+
+The bootstrap supports a read-only **preflight** report (OS, architecture, WSL, Docker,
+NVIDIA, free disk space and installed CLIs) and targeted non-interactive installs:
+
+```bash
+bash setup-ubuntu.sh --preflight
+bash setup-ubuntu.sh --dry-run --only fzf,ripgrep,bat-fd,direnv
+bash setup-ubuntu.sh --only fzf,ripgrep,bat-fd,direnv
+bash setup-ubuntu.sh --only kubectl --kubectl-version v1.35.1
+```
+
+Without `--only`, optional components are prompted interactively and the basic
+prerequisite packages are installed. With `--only`, **only the selected installers**
+run (plus normal APT dependencies), without unrelated package upgrades.
+`--dry-run` prints planned components and never executes installers;
+`--preflight` only inspects the environment. Use `--help` for the full list.
+
+Shell configuration changes to existing `~/.zshrc` or `~/.bashrc` create a
+timestamped `.devbox-backup-YYYYMMDD-HHMMSS` copy before the first change in
+each run. The installer preserves legacy configuration blocks and warns about
+known obsolete aliases/auto-cd blocks; it **does not delete or migrate user edits**.
+
+Every selected installer performs a lightweight post-install check for its binary
+or expected artifact. This does **not** replace an end-to-end runtime test:
+Docker daemon/GPU availability and Kubernetes cluster connectivity must be tested
+separately.
+
+## All installers and official references
+
+See [the installer catalog](docs/installers/README.md) for purpose, official
+website/repository, installation method, verification commands and caveats
+for every installer. The CLI tool guides linked above contain usage examples.
+
+- [Docker Engine](docs/installers/docker.md) documents package conflict
+  detection. The script refuses to remove existing conflicting packages.
+- [kubectl](docs/installers/kubectl.md) explains version selection and version
+  skew: choose a client within one minor version of the Kubernetes cluster.
+- [NVIDIA Container Toolkit](docs/installers/nvidia.md) explains host prerequisites
+  and verifying `nvidia-ctk` / Docker GPU runtime.
+
 ## Validation
 
 ```bash
