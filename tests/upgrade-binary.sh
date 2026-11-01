@@ -5,6 +5,7 @@ temp="$(mktemp -d)"
 trap 'rm -rf -- "$temp"' EXIT
 mkdir -p "$temp/bin"
 export MOCK_LOG="$temp/sudo.log"
+export BOOTSTRAP_DRY_RUN=0
 cat > "$temp/bin/sudo" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$MOCK_LOG"
