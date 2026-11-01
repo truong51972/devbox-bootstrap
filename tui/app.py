@@ -98,21 +98,19 @@ class DevboxTUI:
                 "COMPONENTS", Frame(self.selector, title="Select tools (Space)"),
                 "Space: toggle   A: all   N: none   Enter: next   Esc: back"),
             "confirm": self._page(
-                "CONFIRM", VSplit([
-                    Frame(Label(lambda: self._selection_summary()), title="Plan",
-                          width=Dimension(weight=2)),
-                    Frame(self.options, title="Optional changes (default OFF)",
-                          width=Dimension(weight=3)),
-                ], padding=1),
+                "CONFIRM", HSplit([
+                    Frame(Label(lambda: self._selection_summary()), title="Plan"),
+                    Frame(self.options, title="Optional changes (default OFF)"),
+                ]),
                 "Space: optional choice   D: dry-run   Enter: run   Esc: back"),
             "run": self._page(
-                "EXECUTION", VSplit([
+                "EXECUTION", HSplit([
                     Frame(self.status_view, title="Component status",
-                          width=Dimension(weight=2)),
+                          height=Dimension(weight=3, min=6)),
                     Frame(self.log_view, title="Recent output",
-                          width=Dimension(weight=3)),
-                ], padding=1),
-                "Running in foreground-managed subprocess; full output saved to disk"),
+                          height=Dimension(weight=2, min=6)),
+                ]),
+                "Up/Down: scroll status   Full log saved to disk"),
             "result": self._page(
                 "RESULT", Frame(self.results_view, title="Execution summary"),
                 "L: view log   Enter: main menu   Esc: main menu"),
@@ -140,7 +138,10 @@ class DevboxTUI:
                 "frame.border": "fg:ansiblue",
                 "radio-list": "fg:ansiwhite",
                 "checkbox-list": "fg:ansiwhite",
-                "selected-option": "fg:ansicyan bold",
+                "radio-selected": "fg:ansicyan bold",
+                "checkbox-selected": "fg:ansicyan bold",
+                "radio-checked": "fg:ansigreen bold",
+                "checkbox-checked": "fg:ansigreen bold",
             }),
         )
         self.app.ttimeoutlen = 0.08  # Esc should feel immediate, not wait 0.5s.
@@ -328,12 +329,10 @@ class DevboxTUI:
         self.options = CheckboxList(options or [("placeholder", "No optional changes")])
         self._bind_choice(self.options, self.execute_selection, confirm=True)
         self.views["confirm"] = self._page(
-            "CONFIRM", VSplit([
-                Frame(Label(lambda: self._selection_summary()), title="Plan",
-                      width=Dimension(weight=2)),
-                Frame(self.options, title="Optional changes (default OFF)",
-                      width=Dimension(weight=3)),
-            ], padding=1),
+            "CONFIRM", HSplit([
+                Frame(Label(lambda: self._selection_summary()), title="Plan"),
+                Frame(self.options, title="Optional changes (default OFF)"),
+            ]),
             "Space: optional choice   D: dry-run   Enter: run   Esc: back")
         self._notice("Review the plan. Optional changes are OFF by default.")
         self.navigate("confirm", self.options)
@@ -343,10 +342,24 @@ class DevboxTUI:
             return "Update Devbox source\nFast-forward only\n\nRestart TUI afterward."
         added = f"\nAuto-added: {', '.join(self.auto_added)}" if self.auto_added else ""
         mode = "DRY RUN (no installation)" if self.dry_run else "REAL EXECUTION"
-        return f"{self.action.title()}: {len(self.selected)} component(s)\n{mode}\n\n" + \
-            "\n".join(self.selected) + added
+        shown = self.selected[:5]
+        remaining = len(self.selected) - len(shown)
+        details = "\n".join(shown)
+        if remaining:
+            details += f"\n...and {remaining} more"
+        warnings = []
+        if "nvidia" in self.selected:
+            warnings.append("NVIDIA setup may restart Docker")
+        if "docker" in self.selected and self.action == "upgrade":
+            warnings.append("Docker upgrade may restart containers")
+        note = "\n" + "\n".join(warnings) if warnings else ""
+        return f"{self.action.title()}: {len(self.selected)} component(s)\n{mode}\n" + \
+            details + added + note
 
     def toggle_dry_run(self) -> None:
+        if self.action == "update":
+            self._notice("Devbox source update cannot be dry-run in the TUI.")
+            return
         if self.busy:
             self._notice("Cannot change preview while a task is active.")
             return
@@ -494,7 +507,7 @@ class DevboxTUI:
             if name in self.status:
                 self.status[name] = state
         self.status_view.text = self._render_status()
-        self.log_view.text = log_tail(self.log_path)
+        self.log_view.text = log_tail(self.log_path, count=10)
         self.app.invalidate()
 
     def _render_result(self) -> None:
