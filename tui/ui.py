@@ -181,6 +181,24 @@ class KeyboardList:
         values = self.visible
         return values[min(self.index, len(values) - 1)] if values else None
 
+    @property
+    def current_value(self) -> str | None:
+        entry = self.current
+        return entry.key if entry is not None else None
+
+    @property
+    def current_values(self) -> list[str]:
+        return [entry.key for entry in self.entries if entry.key in self.selected]
+
+    @current_values.setter
+    def current_values(self, values: Sequence[str]) -> None:
+        self.selected = set(values)
+        self.on_change()
+
+    @property
+    def values(self) -> list[tuple[str, str]]:
+        return [(entry.key, entry.label) for entry in self.entries]
+
     def set_query(self, query: str) -> None:
         self.query = query
         self.index = 0
