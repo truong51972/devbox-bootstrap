@@ -13,7 +13,7 @@ if command -v kubectl >/dev/null 2>&1; then
         if [[ "$existing_version" == *"\"$requested_version\"" ]]; then
             install_kubectl=false
             log "kubectl $requested_version is already installed."
-        elif ! confirm "kubectl exists with a different version; replace it with $requested_version?"; then
+        elif ! confirm "kubectl exists with a different version; replace it with $requested_version?" kubectl_replace; then
             die 'kubectl version selection cancelled; existing binary was preserved.'
             return 1
         fi

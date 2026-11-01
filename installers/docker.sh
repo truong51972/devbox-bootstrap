@@ -30,7 +30,7 @@ else
 fi
 if ! id -nG "$USER" | tr ' ' '\n' | grep -qx docker; then
     warn 'The docker group grants root-equivalent permissions.'
-    if confirm 'Add the current user to the docker group (requires new login)?'; then
+    if confirm 'Add the current user to the docker group (requires new login)?' docker_group; then
         sudo usermod -aG docker "$USER"
     fi
 fi
