@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
@@ -72,6 +75,34 @@ class LayoutTests(unittest.TestCase):
         self.assertIn("1 / 2 complete", progress)
         self.assertIn("Current: uv", progress)
         self.assertNotIn("%", progress)
+
+    def test_theme_selection_is_reversible(self):
+        with patch.dict(os.environ, {"DEVBOX_THEME": "mono"}):
+            app = DevboxTUI()
+        self.assertEqual(app.theme, "mono")
+        app.toggle_theme()
+        self.assertEqual(app.theme, "minimal")
+        app.toggle_theme()
+        self.assertEqual(app.theme, "mono")
+
+    def test_history_labels_and_filter_are_useful(self):
+        with TemporaryDirectory() as tmp, patch("tui.app.STATE_ROOT", Path(tmp)):
+            logs = Path(tmp) / "logs"
+            logs.mkdir()
+            (logs / "20261101-101020-install-a.log").write_text("installed uv\n")
+            (logs / "20261101-111020-doctor-b.log").write_text("healthy\n")
+            app = DevboxTUI()
+            app.list_history()
+            self.assertEqual(app.screen, "logs")
+            self.assertEqual(len(app.log_files.visible), 2)
+            first = app.log_files.visible[0]
+            self.assertIn("Doctor", first.label)
+            self.assertIn("2026-11-01", first.label)
+            details = "".join(text for _, text in app._history_details())
+            self.assertIn("healthy", details)
+            app.log_files.set_query("install")
+            self.assertEqual(len(app.log_files.visible), 1)
+            self.assertIn("Install", app.log_files.current.label)
 
     def test_compact_info_and_keyboard_search(self):
         async def scenario():
