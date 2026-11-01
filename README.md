@@ -34,12 +34,33 @@ If `~/.local/bin` is not in your `PATH`, use `~/.local/bin/devbox` directly.
 to overwrite tracked local edits or diverged Git history. Restart the TUI
 after updating source code.
 
-The TUI offers component selection, Install, Upgrade, Doctor, Preflight,
-Dry-run preview and Update code. Tasks execute sequentially so APT/dpkg
-operations do not compete for locks. The interface stays responsive while
-subprocesses run; it requests `sudo` authentication in the visible terminal
-before privileged operations. Optional interactive shell prompts are skipped
-in this first TUI version; use the Bash CLI for those prompts if required.
+The keyboard-first TUI starts at a **main menu**. Install/Upgrade opens
+component selection, confirmation, execution progress and result screens.
+Doctor, Preflight, Update Devbox, and Logs & History are separate options.
+Mouse input is deliberately disabled.
+
+| Key | Context | Action |
+| --- | --- | --- |
+| Up/Down or j/k, Enter | Main menu | Navigate / open |
+| Space | Components / confirmation | Toggle selection |
+| A / N | Components | Select all / clear |
+| D | Confirmation | Toggle dry-run |
+| Esc | Idle screens | Back |
+| L | Results | View saved log |
+| O | Log viewer | Open external pager (if installed) |
+| ? | Most screens | Show keyboard help |
+| Q | Main menu | Quit |
+
+Only one job can run at a time. While it runs, the TUI keeps the log and
+progress visible and disables quitting/detaching. Sudo authentication is shown
+in the terminal before privileged operations.
+
+Optional confirmations are **OFF by default** and made on the confirmation
+screen: changing the default login shell to Zsh, joining the Docker group
+(root-equivalent permissions), and creating a new Ed25519 SSH key. The key
+generated through the TUI has **no passphrase**; consider generating a
+passphrase-protected key manually instead. Unknown unattended confirmation
+requests are denied. The original interactive Bash CLI is unchanged.
 
 Full output is saved under
 `~/.local/state/devbox-bootstrap/logs/`, and a small separate event stream
