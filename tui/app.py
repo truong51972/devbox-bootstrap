@@ -144,7 +144,8 @@ class DevboxTUI:
                 "checkbox-checked": "fg:ansigreen bold",
             }),
         )
-        self.app.ttimeoutlen = 0.08  # Esc should feel immediate, not wait 0.5s.
+        self.app.ttimeoutlen = 0.08  # VT100 sequence parsing.
+        self.app.timeoutlen = 0.10   # KeyProcessor ambiguity timeout for lone Esc.
         self._bind_choice(self.menu, self.open_menu, radio=True, home=True)
         self._bind_text(self.results_view, result=True)
         self._bind_text(self.history_view, log_viewer=True)
