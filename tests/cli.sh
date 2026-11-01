@@ -62,4 +62,9 @@ piped_output="$(cat "$repo_dir/setup-ubuntu.sh" | PATH="$temp_bin/gitmock:$temp_
 [[ "$piped_output" == *'daemon unreachable'* ]]
 grep -Fq 'clone --depth 1' "$MOCK_GIT_LOG"
 
+# --upgrade can be piped without TTY, and forwards arguments to the checkout.
+upgrade_output="$(cat "$repo_dir/setup-ubuntu.sh" | PATH="$temp_bin/gitmock:$temp_bin:$PATH" bash -s -- --upgrade --dry-run --only fzf 2>&1)"
+[[ "$upgrade_output" == *'Upgrade installed devbox tools only'* ]]
+[[ "$upgrade_output" == *'Upgrade summary'* ]]
+
 printf 'CLI tests passed.\n'

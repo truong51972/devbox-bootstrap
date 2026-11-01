@@ -22,3 +22,4 @@ jobs:
           bash tests/config.sh
           bash tests/docker.sh
           bash tests/hardening.sh
+          bash tests/upgrade.sh

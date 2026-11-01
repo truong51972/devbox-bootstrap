@@ -90,7 +90,7 @@ if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
 fi
 if [[ -z "$SCRIPT_DIR" || ! -f "$SCRIPT_DIR/utils/utils.sh" ]]; then
     if ! command -v git >/dev/null; then
-        if (( BOOTSTRAP_DRY_RUN || PREFLIGHT_ONLY || DOCTOR_ONLY )); then
+        if (( BOOTSTRAP_DRY_RUN || PREFLIGHT_ONLY || DOCTOR_ONLY || UPGRADE_ONLY )); then
             echo 'Git is needed to inspect the remote checkout.' >&2
             exit 1
         fi
