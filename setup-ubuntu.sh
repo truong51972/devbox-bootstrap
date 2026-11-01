@@ -9,6 +9,7 @@ Interactive Ubuntu workstation bootstrap (run as a regular user, not sudo).
 Options:
   -h, --help                 Show this help
   --preflight                Inspect environment without modifying anything
+  --doctor                   Check installed tools, shell hooks and runtime health
   --dry-run                  Show selected operations without installing anything
   --only ITEMS               Comma-separated components, no component selection prompts
   --kubectl-version VERSION  Pin kubectl to a release such as v1.35.1
@@ -16,7 +17,7 @@ Options:
 Components:
   zsh, powerlevel10k, uv, keychain, zoxide,
   fzf, ripgrep, bat-fd, direnv,
-  docker, nvidia, kubectl, clean
+  docker, nvidia, kubectl, minikube, clean
 
 Examples:
   bash setup-ubuntu.sh --preflight
@@ -29,12 +30,14 @@ original_args=("$@")
 ONLY_COMPONENTS=''
 BOOTSTRAP_DRY_RUN=0
 PREFLIGHT_ONLY=0
+DOCTOR_ONLY=0
 BOOTSTRAP_KUBECTL_VERSION=''
 while (( $# > 0 )); do
     case "$1" in
         -h|--help) usage; exit 0 ;;
         --dry-run) BOOTSTRAP_DRY_RUN=1; shift ;;
         --preflight) PREFLIGHT_ONLY=1; shift ;;
+        --doctor) DOCTOR_ONLY=1; shift ;;
         --only|--kubectl-version)
             key="$1"
             if (( $# < 2 )) || [[ -z "$2" ]]; then
@@ -60,14 +63,14 @@ if [[ -n "$ONLY_COMPONENTS" ]]; then
     IFS=',' read -r -a requested <<< "$ONLY_COMPONENTS"
     for component in "${requested[@]}"; do
         case "$component" in
-            zsh|powerlevel10k|uv|keychain|zoxide|fzf|ripgrep|bat-fd|direnv|docker|nvidia|kubectl|clean) ;;
+            zsh|powerlevel10k|uv|keychain|zoxide|fzf|ripgrep|bat-fd|direnv|docker|nvidia|kubectl|minikube|clean) ;;
             *) printf 'Unknown component: %s\n' "$component" >&2; exit 2 ;;
         esac
     done
 fi
 export BOOTSTRAP_KUBECTL_VERSION BOOTSTRAP_DRY_RUN
 
-if (( EUID == 0 && PREFLIGHT_ONLY == 0 && BOOTSTRAP_DRY_RUN == 0 )); then
+if (( EUID == 0 && PREFLIGHT_ONLY == 0 && DOCTOR_ONLY == 0 && BOOTSTRAP_DRY_RUN == 0 )); then
     echo 'Run as a regular user, not as root/sudo.' >&2
     exit 1
 fi
@@ -79,7 +82,7 @@ if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
 fi
 if [[ -z "$SCRIPT_DIR" || ! -f "$SCRIPT_DIR/utils/utils.sh" ]]; then
     if ! command -v git >/dev/null; then
-        if (( BOOTSTRAP_DRY_RUN || PREFLIGHT_ONLY )); then
+        if (( BOOTSTRAP_DRY_RUN || PREFLIGHT_ONLY || DOCTOR_ONLY )); then
             echo 'Git is needed to inspect the remote checkout.' >&2
             exit 1
         fi
@@ -89,7 +92,7 @@ if [[ -z "$SCRIPT_DIR" || ! -f "$SCRIPT_DIR/utils/utils.sh" ]]; then
     temp_dir="$(mktemp -d /tmp/devbox-bootstrap.XXXXXX)"
     trap 'rm -rf -- "$temp_dir"' EXIT
     git clone --depth 1 https://github.com/truong51972/devbox-bootstrap.git "$temp_dir"
-    if [[ -t 0 || -n "$ONLY_COMPONENTS" ]] || (( PREFLIGHT_ONLY )); then
+    if [[ -t 0 || -n "$ONLY_COMPONENTS" ]] || (( PREFLIGHT_ONLY || DOCTOR_ONLY )); then
         # Targeted/preflight modes do not require a terminal for component selection.
         bash "$temp_dir/setup-ubuntu.sh" "${original_args[@]}"
     elif [[ -r /dev/tty ]]; then
@@ -104,6 +107,12 @@ fi
 # shellcheck source=utils/utils.sh
 source "$SCRIPT_DIR/utils/utils.sh"
 cd "$SCRIPT_DIR"
+if (( DOCTOR_ONLY )); then
+    # shellcheck source=utils/doctor.sh
+    source "$SCRIPT_DIR/utils/doctor.sh"
+    doctor_main
+    exit $?
+fi
 
 if [[ ! -r /etc/os-release ]]; then
     die 'Cannot identify Linux distribution.'
@@ -161,6 +170,7 @@ verify_component() {
         direnv) verify_binary "$component" direnv || return 1 ;;
         docker) verify_binary "$component" docker || return 1 ;;
         nvidia) verify_binary "$component" nvidia-ctk || return 1 ;;
+        minikube) verify_binary "$component" minikube || return 1 ;;
         kubectl)
             verify_binary "$component" kubectl || return 1
             if [[ -n "$BOOTSTRAP_KUBECTL_VERSION" ]]; then
@@ -176,23 +186,84 @@ verify_component() {
     log "Verified: $component"
 }
 
+declare -A COMPONENT_STATUS=()
+declare -a COMPONENT_ORDER=()
+CURRENT_COMPONENT=''
+
+print_summary() {
+    (( ${#COMPONENT_ORDER[@]} > 0 )) || return 0
+    printf '\n[devbox] Installation summary:\n'
+    local component
+    for component in "${COMPONENT_ORDER[@]}"; do
+        printf '  %-17s %s\n' "$component" "${COMPONENT_STATUS[$component]:-UNKNOWN}"
+    done
+}
+# Exit trap also reports failures raised by set -e inside sourced installers.
+finish_bootstrap() {
+    local result="$1"
+    if (( result != 0 )) && [[ -n "$CURRENT_COMPONENT" ]]; then
+        COMPONENT_STATUS["$CURRENT_COMPONENT"]=FAILED
+    fi
+    print_summary
+}
+trap 'finish_bootstrap "$?"' EXIT
+
 run_component() {
     local component="$1" prompt="$2" installer="$3"
     if [[ -n "$ONLY_COMPONENTS" ]]; then
         selected "$component" || return 0
-    elif ! confirm "$prompt"; then
+    else
+        case "$component" in
+            powerlevel10k)
+                if ! command -v zsh >/dev/null 2>&1; then
+                    warn 'Skipping Powerlevel10k: Zsh is not installed.'
+                    COMPONENT_STATUS["$component"]=SKIPPED
+                    COMPONENT_ORDER+=("$component")
+                    return 0
+                fi ;;
+            nvidia)
+                if ! command -v docker >/dev/null 2>&1; then
+                    warn 'Skipping NVIDIA Toolkit: Docker is not installed.'
+                    COMPONENT_STATUS["$component"]=SKIPPED
+                    COMPONENT_ORDER+=("$component")
+                    return 0
+                fi ;;
+        esac
+        if ! confirm "$prompt"; then
+            COMPONENT_STATUS["$component"]=SKIPPED
+            COMPONENT_ORDER+=("$component")
+            return 0
+        fi
+    fi
+
+    COMPONENT_ORDER+=("$component")
+    if (( BOOTSTRAP_DRY_RUN )); then
+        log "[dry-run] Would run: installers/$installer"
+        COMPONENT_STATUS["$component"]=PLANNED
         return 0
     fi
 
-    if (( BOOTSTRAP_DRY_RUN )); then
-        log "[dry-run] Would run: installers/$installer"
-        return 0
-    fi
+    CURRENT_COMPONENT="$component"
+    COMPONENT_STATUS["$component"]=FAILED
+    DEVBOX_COMPONENT_SKIPPED=0
     log "Installing: $component"
-    # Each installer sources shared utilities and inherits fail-fast semantics.
+    # Do not put source in an if/! condition: it would disable errexit in installers.
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/installers/$installer"
-    verify_component "$component"
+    if (( DEVBOX_COMPONENT_SKIPPED )); then
+        COMPONENT_STATUS["$component"]=SKIPPED
+    else
+        verify_component "$component"
+        case "$component" in
+            fzf|direnv|zoxide|keychain|zsh|powerlevel10k|nvidia|kubectl)
+                COMPONENT_STATUS["$component"]=CONFIGURED ;;
+            *) COMPONENT_STATUS["$component"]=INSTALLED ;;
+        esac
+    fi
+    if [[ "$component" == zsh && "${COMPONENT_STATUS[$component]}" == CONFIGURED ]]; then
+        export BOOTSTRAP_TARGET_SHELL=zsh
+    fi
+    CURRENT_COMPONENT=''
 }
 
 if [[ -z "$ONLY_COMPONENTS" ]]; then
@@ -216,7 +287,8 @@ run_component ripgrep 'Install ripgrep (rg)?' ripgrep.sh
 run_component bat-fd 'Install bat and fd?' bat-fd.sh
 run_component docker 'Install Docker Engine?' docker.sh
 run_component nvidia 'Install NVIDIA Container Toolkit?' nvidia-container-toolkit.sh
-run_component kubectl 'Install kubectl (optionally Minikube)?' k8s.sh
+run_component kubectl 'Install kubectl?' k8s.sh
+run_component minikube 'Install Minikube (local Kubernetes)?' minikube.sh
 run_component direnv 'Install direnv?' direnv.sh
 run_component clean 'Run apt autoremove/autoclean?' clean.sh
 
