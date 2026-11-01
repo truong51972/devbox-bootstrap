@@ -2,6 +2,49 @@
 
 A small, interactive bootstrap for **Ubuntu** developer machines and Ubuntu on WSL. Run it as your regular user; individual package steps request `sudo` as needed.
 
+## Recommended: install the interactive TUI
+
+On Ubuntu/WSL, ensure Git, Python and the Python venv module are available:
+
+```bash
+sudo apt-get install -y git python3 python3-venv
+curl -fsSL https://raw.githubusercontent.com/truong51972/devbox-bootstrap/main/install-devbox.sh | bash
+```
+
+This checks out Devbox into `~/.local/share/devbox-bootstrap`, creates an isolated
+`.venv` using Python's built-in `venv` module and installs only
+`prompt_toolkit` and its small dependencies. It links the launcher at
+`~/.local/bin/devbox`; no global Python packages or `pip3` are required.
+
+```bash
+devbox                  # Open the interactive terminal UI
+devbox --update         # Fast-forward Devbox's source code from GitHub
+devbox --doctor         # Read-only system health check
+devbox --upgrade        # Update installed development tools (not Devbox code)
+devbox --help
+```
+
+If `~/.local/bin` is not in your `PATH`, use `~/.local/bin/devbox` directly.
+`devbox --update` verifies the expected GitHub origin and branch and refuses
+to overwrite tracked local edits or diverged Git history. Restart the TUI
+after updating source code.
+
+The TUI offers component selection, Install, Upgrade, Doctor, Preflight,
+Dry-run preview and Update code. Tasks execute sequentially so APT/dpkg
+operations do not compete for locks. The interface stays responsive while
+subprocesses run; it requests `sudo` authentication in the visible terminal
+before privileged operations. Optional interactive shell prompts are skipped
+in this first TUI version; use the Bash CLI for those prompts if required.
+
+Full output is saved under
+`~/.local/state/devbox-bootstrap/logs/`, and a small separate event stream
+feeds the per-component status display. The UI shows a bounded log preview.
+A running task must finish before closing the interface; this version does
+**not** detach jobs to continue after you exit.
+
+You can still use the original command-line bootstrap, standalone Doctor and
+update commands below.
+
 ## Quick start
 
 ```bash
