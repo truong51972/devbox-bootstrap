@@ -59,6 +59,28 @@ class PonytailStatusTests(unittest.TestCase):
             "No extensions installed\n"
         ), "Missing")
 
+    def test_gemini_multiline_enabled_flags(self):
+        output = (
+            "✓ ponytail (5.0)\n"
+            "  Path: /home/user/.gemini/extensions/ponytail\n"
+            "  Enabled (User): true\n"
+            "  Enabled (Workspace): true\n"
+        )
+        self.assertEqual(
+            agent_status._from_text(output, gemini=True), "Installed"
+        )
+        self.assertEqual(
+            agent_status._from_text(
+                output.replace("Enabled (Workspace): true",
+                               "Enabled (Workspace): false"),
+                gemini=True,
+            ), "Disabled",
+        )
+        self.assertEqual(
+            agent_status._from_text("✓ ponytail\n", gemini=True),
+            "Unverified",
+        )
+
     def test_probe_rejects_missing_cli_and_failed_commands(self):
         with patch("tui.agent_status.shutil.which", return_value=None):
             self.assertEqual(agent_status.probe_agent("codex"), "Unverified")

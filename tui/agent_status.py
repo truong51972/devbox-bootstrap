@@ -57,14 +57,39 @@ def _from_json(agent: str, output: str) -> str:
     return "Missing"
 
 
-def _from_text(output: str) -> str:
+def _from_text(output: str, *, gemini: bool = False) -> str:
     text = _ANSI.sub("", output)
-    lines = [line.strip() for line in text.splitlines() if _PONYTAIL.search(line)]
-    if not lines:
+    lines = text.splitlines()
+    matches = [
+        index for index, line in enumerate(lines)
+        if _PONYTAIL.search(line)
+        and not line.strip().lower().startswith(("path:", "source:", "id:"))
+    ]
+    if not matches:
         return "Missing"
-    # Only consider explicit per-plugin entries, not arbitrary error messages.
+
+    if gemini:
+        # Gemini prints a multi-line extension block. Its enabled flags are
+        # below the extension name, not on the same line.
+        for index in matches:
+            flags = []
+            for line in lines[index:index + 12]:
+                matched = re.match(
+                    r"\s*Enabled\s*\((User|Workspace)\)\s*:\s*(true|false)",
+                    line, re.I,
+                )
+                if matched:
+                    flags.append(matched.group(2).lower() == "true")
+            if flags and all(flags):
+                return "Installed"
+            if flags and not all(flags):
+                return "Disabled"
+        # A plugin name alone does not prove that an extension is enabled.
+        return "Unverified"
+
+    relevant = [lines[index] for index in matches]
     if any(re.search(r"\b(disabled|inactive|not enabled)\b", line, re.I)
-           for line in lines):
+           for line in relevant):
         return "Disabled"
     return "Installed"
 
@@ -85,7 +110,7 @@ def probe_agent(agent: str) -> str:
         return "Unverified"
     return (_from_json(agent, result.stdout)
             if agent in ("claude", "codex", "copilot")
-            else _from_text(result.stdout))
+            else _from_text(result.stdout, gemini=agent == "gemini"))
 
 
 def probe_ponytail(receipt_dir: Path | None = None) -> dict[str, str]:
