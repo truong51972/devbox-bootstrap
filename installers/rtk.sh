@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # RTK - https://github.com/rtk-ai/rtk
 # Requires explicit agent targets to change agent hook configuration.
+# Keep pre-existing installations untouched; only newly installed binaries are owned by Devbox.
+rtk_state="$HOME/.local/state/devbox-bootstrap/managed"
+rtk_receipt="$rtk_state/rtk.sha256"
 rtk_exe="$(command -v rtk || true)"
 if [[ -z "$rtk_exe" && -x "$HOME/.local/bin/rtk" ]]; then
     rtk_exe="$HOME/.local/bin/rtk"
@@ -27,8 +30,17 @@ else
     rm -rf -- "$tmp_dir"
     rtk_exe="$HOME/.local/bin/rtk"
     "$rtk_exe" gain >/dev/null 2>&1 || { die 'RTK post-install identity check failed.'; return 1; }
+    mkdir -p "$rtk_state"
+    sha256sum "$rtk_exe" | awk '{print $1}' > "$rtk_receipt"
+    chmod 600 "$rtk_receipt"
 fi
 
+# Preflight all selected agents before editing any agent configuration.
+for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
+    command -v "$agent" >/dev/null 2>&1 || {
+        die "Cannot configure RTK for $agent: CLI is not on PATH."; return 1;
+    }
+done
 for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
     case "$agent" in
         claude) agent_bin=claude; init_args=(-g --auto-patch) ;;
@@ -38,9 +50,6 @@ for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
         gemini) agent_bin=gemini; init_args=(-g --gemini) ;;
         *) die "Unsupported RTK target: $agent"; return 1 ;;
     esac
-    command -v "$agent_bin" >/dev/null 2>&1 || {
-        die "Cannot configure RTK for $agent: $agent_bin CLI is not on PATH."; return 1;
-    }
     log "Configuring RTK upstream integration for $agent"
     "$rtk_exe" init "${init_args[@]}"
 done

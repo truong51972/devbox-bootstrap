@@ -52,8 +52,8 @@ def executable(name: str) -> bool:
 
 def installed(code: str) -> bool:
     if code == "ponytail":
-        # Only reflects successful Devbox-managed installs; not arbitrary agent plugins.
-        return any((Path.home() / ".local/state/devbox-bootstrap/agent-extensions").glob("ponytail-*"))
+        # A recorded install is not proof the agent plugin is still enabled.
+        return False
     if code == "powerlevel10k":
         return (Path.home() / "powerlevel10k/powerlevel10k.zsh-theme").is_file()
     if code == "rtk":
@@ -72,7 +72,10 @@ def installed(code: str) -> bool:
 
 def inventory() -> dict[str, str]:
     """Availability, not a guarantee that a daemon or shell hook is healthy."""
-    return {code: "Installed" if installed(code) else "Missing" for code in ORDER}
+    result = {code: "Installed" if installed(code) else "Missing" for code in ORDER}
+    if any((Path.home() / ".local/state/devbox-bootstrap/agent-extensions").glob("ponytail-*")):
+        result["ponytail"] = "Unverified"
+    return result
 
 
 def with_dependencies(selected: list[str], present: dict[str, str]) -> tuple[list[str], list[str]]:

@@ -71,7 +71,7 @@ DESCRIPTIONS = {
     "direnv": "Directory-specific environment variables.",
     "rtk": "Token-saving command proxy. Agent hooks are opt-in.",
     "skills-cli": "Vercel Skills CLI; requires Node.js >= 22.20 and npm.",
-    "ponytail": "Upstream Ponytail plugin, installed only for selected agents.",
+    "ponytail": "Upstream Ponytail plugin; receipt status requires agent-side verification.",
 }
 WARNINGS = {
     "docker": "Docker group access grants root-equivalent privileges.",

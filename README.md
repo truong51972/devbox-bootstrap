@@ -171,7 +171,9 @@ set is applied to both. RTK **without** targets installs only the binary.
 
 **Prerequisites and trust:** Skills CLI requires Node.js >= 22.20 and npm.
 Ponytail's Claude and Codex plugin hooks need Node.js. These dependencies
-are checked, not silently installed. RTK is installed with its official
+are checked, not silently installed. Claude Code plugin installation from the
+non-interactive TUI uses the documented `claude plugin install ... --yes` CLI
+form after adding the marketplace. RTK is installed with its official
 download script into `~/.local/bin`, and its upstream release checksum check
 must succeed; Devbox also verifies `rtk gain` to avoid confusing it with
 an unrelated `rtk` package. Skills CLI is installed through npm under
@@ -182,10 +184,13 @@ the upstream repository and plugin permissions before installing.
 **Activation and maintenance:** Restart the targeted agents afterward. In
 Codex, open `/hooks`, review and trust Ponytail's lifecycle hooks yourself.
 Devbox stores a Ponytail install receipt under
-`~/.local/state/devbox-bootstrap/agent-extensions/`; it is not proof the
-plugin remains enabled. `--doctor` is read-only and cannot validate all
+`~/.local/state/devbox-bootstrap/agent-extensions/`; the TUI shows
+`Unverified` rather than `Installed` because the receipt does not prove that
+an agent still has its plugin enabled. `--doctor` is read-only and cannot validate all
 third-party plugin states. `--upgrade` only updates Devbox-owned RTK and
-Skills CLI installations; Ponytail updates remain under the agent's own
+Skills CLI installations **with ownership receipts**; any pre-existing
+user-local binaries are preserved and remain externally managed. Ponytail
+updates remain under the agent's own
 plugin manager. This P0 release intentionally does not provide automatic
 uninstall or rollback of agent-owned configuration. Do not assume Devbox
 will remove any external hooks when uninstalling the binary.

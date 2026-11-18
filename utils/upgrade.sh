@@ -246,6 +246,19 @@ upgrade_rtk() {
         fi
         return 0
     fi
+    local receipt="$HOME/.local/state/devbox-bootstrap/managed/rtk.sha256" expected current
+    if [[ ! -f "$receipt" ]]; then
+        warn 'RTK binary has no Devbox ownership receipt; refusing to overwrite it.'
+        UPGRADE_BLOCKED=1
+        return 0
+    fi
+    expected="$(cat "$receipt")"
+    current="$(sha256sum "$binary" | awk '{print $1}')"
+    if [[ ! "$expected" =~ ^[0-9a-f]{64}$ || "$expected" != "$current" ]]; then
+        warn 'RTK binary differs from Devbox-installed version; refusing to overwrite it.'
+        UPGRADE_BLOCKED=1
+        return 0
+    fi
     UPGRADE_FOUND=1
     if ! "$binary" gain >/dev/null 2>&1; then
         warn 'The user-local rtk binary is not the rtk-ai token optimizer.'
@@ -270,6 +283,8 @@ upgrade_rtk() {
     rm -rf -- "$tmp"
     "$binary" gain >/dev/null 2>&1 || { die 'Upgraded RTK failed identity check.'; return 1; }
     after="$("$binary" --version)"
+    sha256sum "$binary" | awk '{print $1}' > "$receipt"
+    chmod 600 "$receipt"
     [[ "$before" == "$after" ]] || UPGRADE_CHANGED=1
 }
 
@@ -280,6 +295,17 @@ upgrade_skills_cli() {
             warn 'Skills CLI is externally managed; update it with its original manager.'
             UPGRADE_BLOCKED=1
         fi
+        return 0
+    fi
+    local receipt="$HOME/.local/state/devbox-bootstrap/managed/skills-cli"
+    if [[ ! -f "$receipt" || "$(cat "$receipt")" != "$HOME/.local/bin/skills" ]]; then
+        warn 'Skills CLI has no matching Devbox ownership receipt; refusing to overwrite it.'
+        UPGRADE_BLOCKED=1
+        return 0
+    fi
+    if [[ "$(readlink -f "$HOME/.local/bin/skills")" != "$HOME/.local/lib/node_modules/skills/bin/cli.mjs" ]]; then
+        warn 'Skills CLI entrypoint differs from Devbox package; refusing to overwrite it.'
+        UPGRADE_BLOCKED=1
         return 0
     fi
     UPGRADE_FOUND=1

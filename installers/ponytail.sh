@@ -4,21 +4,24 @@
 if (( ${#DEVBOX_AGENT_TARGETS_ARRAY[@]} == 0 )); then
     die 'Ponytail requires at least one --agents target.'; return 1
 fi
+# Validate *every* target before making any changes to plugin registrations.
 for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
+    command -v "$agent" >/dev/null 2>&1 || {
+        die "Ponytail target $agent is not on PATH."; return 1;
+    }
     case "$agent" in
         claude|codex)
             command -v node >/dev/null 2>&1 || {
                 die "Ponytail $agent lifecycle hooks need Node.js on PATH."; return 1;
             } ;;
     esac
-    command -v "$agent" >/dev/null 2>&1 || {
-        die "Ponytail target $agent is not on PATH."; return 1;
-    }
+done
+for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
     log "Installing Ponytail upstream integration for $agent"
     case "$agent" in
         claude)
             claude plugin marketplace add DietrichGebert/ponytail
-            claude plugin install ponytail@ponytail ;;
+            claude plugin install ponytail@ponytail --yes ;;
         codex)
             codex plugin marketplace add DietrichGebert/ponytail
             codex plugin add ponytail@ponytail ;;
