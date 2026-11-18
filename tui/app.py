@@ -69,13 +69,25 @@ DESCRIPTIONS = {
     "kubectl": "Kubernetes command-line client.",
     "minikube": "Local Kubernetes environment.",
     "direnv": "Directory-specific environment variables.",
+    "rtk": "Token-saving command proxy. Agent hooks are opt-in.",
+    "skills-cli": "Vercel Skills CLI; requires Node.js >= 22.20 and npm.",
+    "ponytail": "Upstream Ponytail plugin; receipt status requires agent-side verification.",
 }
 WARNINGS = {
     "docker": "Docker group access grants root-equivalent privileges.",
     "nvidia": "NVIDIA integration may restart the Docker service.",
     "keychain": "Optional key generation produces a key without a passphrase.",
     "zsh": "Changing the login shell affects future terminal sessions.",
+    "rtk": "Selected agent hooks modify user-level agent configuration.",
+    "ponytail": "Upstream plugin installs may add executable lifecycle hooks; review before enabling.",
 }
+AGENT_EXECUTABLES = (
+    ("claude", "Claude Code", "claude"),
+    ("codex", "Codex", "codex"),
+    ("copilot", "Copilot CLI", "copilot"),
+    ("opencode", "OpenCode", "opencode"),
+    ("gemini", "Gemini CLI", "gemini"),
+)
 @lru_cache(maxsize=64)
 def _cached_log_tail(path: str, size: int, modified_ns: int) -> str:
     """Cache history previews until log size or mtime changes."""
@@ -736,10 +748,20 @@ class DevboxTUI:
                 options.append(Entry("docker_group", "Join docker group (root-equivalent)"))
             if "keychain" in self.selected:
                 options.append(Entry("ssh_key", "Generate unencrypted Ed25519 key if needed"))
+            if {"rtk", "ponytail"} & set(self.selected):
+                for agent, label, binary in AGENT_EXECUTABLES:
+                    if shutil.which(binary):
+                        options.append(Entry("agent_" + agent, "Integrate with " + label))
         self.options = self._make_options(options)
         self._layout_cache.pop("confirm", None)
         self._notice("Review the plan. Optional changes are OFF by default.")
         self.navigate("confirm", self.options.window)
+
+    def _chosen_agents(self) -> list[str]:
+        if not hasattr(self, "options") or self.action != "install":
+            return []
+        selected = set(self.options.current_values)
+        return [agent for agent, _, _ in AGENT_EXECUTABLES if "agent_" + agent in selected]
 
     def _selection_summary(self) -> str:
         if self.action == "update":
@@ -756,6 +778,11 @@ class DevboxTUI:
         if "docker" in self.selected and self.action == "upgrade":
             warnings.append("Docker upgrade may restart containers")
         note = "\n" + "\n".join(warnings) if warnings else ""
+        agents = self._chosen_agents()
+        if agents:
+            note += "\nAgent targets: " + ", ".join(agents)
+        elif "ponytail" in self.selected and self.action == "install":
+            note += "\nSelect an agent target for Ponytail (required)."
         return f"{self.action.title()}: {len(self.selected)} component(s)\n{mode}\n" + details + added + note
 
     def toggle_dry_run(self) -> None:
@@ -778,7 +805,8 @@ class DevboxTUI:
             return
         chosen = list(self.selector.current_values) if selected is None and action in ("install", "upgrade") else list(selected or [])
         try:
-            command = build_command(action, chosen, dry_run=self.dry_run)
+            command = build_command(action, chosen, dry_run=self.dry_run,
+                                    agents=self._chosen_agents() if action == "install" else [])
         except ValueError as exc:
             self._notice(str(exc))
             return
@@ -828,7 +856,9 @@ class DevboxTUI:
         keepalive: asyncio.Task[None] | None = None
         code: int | None = None
         try:
-            if action in ("install", "upgrade") and not self.dry_run:
+            # User-scoped AI extensions never need the preflight sudo prompt.
+            needs_sudo = any(code not in {"rtk", "skills-cli", "ponytail"} for code in selected)
+            if action in ("install", "upgrade") and needs_sudo and not self.dry_run:
                 if not await self._authorize_sudo():
                     code = 1
                     self.last_result = "Cannot start: sudo authentication not completed."

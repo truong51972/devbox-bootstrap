@@ -13,18 +13,21 @@ Options:
   --upgrade                  Upgrade installed tools only (explicit opt-in)
   --dry-run                  Show selected operations without installing anything
   --only ITEMS               Comma-separated components, no component selection prompts
+  --agents ITEMS             Comma-separated agent targets for RTK/Ponytail integrations
   --kubectl-version VERSION  Pin kubectl to a release such as v1.35.1
 
 Components:
   zsh, powerlevel10k, uv, keychain, zoxide,
   fzf, ripgrep, bat-fd, direnv,
-  docker, nvidia, kubectl, minikube, clean
+  docker, nvidia, kubectl, minikube, clean,
+  rtk, skills-cli, ponytail
 
 Examples:
   bash setup-ubuntu.sh --preflight
   bash setup-ubuntu.sh --upgrade --only fzf,ripgrep,bat-fd,direnv
   bash setup-ubuntu.sh --dry-run --only fzf,ripgrep,bat-fd,direnv
   bash setup-ubuntu.sh --only kubectl --kubectl-version v1.35.1
+  bash setup-ubuntu.sh --only rtk,skills-cli,ponytail --agents codex,claude
 HELP
 }
 
@@ -35,6 +38,7 @@ PREFLIGHT_ONLY=0
 DOCTOR_ONLY=0
 UPGRADE_ONLY=0
 BOOTSTRAP_KUBECTL_VERSION=''
+BOOTSTRAP_AGENT_TARGETS=''
 while (( $# > 0 )); do
     case "$1" in
         -h|--help) usage; exit 0 ;;
@@ -42,14 +46,22 @@ while (( $# > 0 )); do
         --preflight) PREFLIGHT_ONLY=1; shift ;;
         --doctor) DOCTOR_ONLY=1; shift ;;
         --upgrade) UPGRADE_ONLY=1; shift ;;
-        --only|--kubectl-version)
+        --only|--kubectl-version|--agents)
             key="$1"
             if (( $# < 2 )) || [[ -z "$2" ]]; then
                 printf 'Missing value for %s\n' "$key" >&2
                 exit 2
             fi
-            if [[ "$key" == --only ]]; then ONLY_COMPONENTS="$2"; else BOOTSTRAP_KUBECTL_VERSION="$2"; fi
+            case "$key" in
+                --only) ONLY_COMPONENTS="$2" ;;
+                --agents) BOOTSTRAP_AGENT_TARGETS="$2" ;;
+                --kubectl-version) BOOTSTRAP_KUBECTL_VERSION="$2" ;;
+            esac
             shift 2 ;;
+        --agents=*)
+            BOOTSTRAP_AGENT_TARGETS="${1#--agents=}"
+            [[ -n "$BOOTSTRAP_AGENT_TARGETS" ]] || { echo "--agents requires a value." >&2; exit 2; }
+            shift ;;
         --only=*)
             ONLY_COMPONENTS="${1#--only=}"
             [[ -n "$ONLY_COMPONENTS" ]] || { echo '--only requires at least one component.' >&2; exit 2; }
@@ -71,10 +83,36 @@ if [[ -n "$ONLY_COMPONENTS" ]]; then
     IFS=',' read -r -a requested <<< "$ONLY_COMPONENTS"
     for component in "${requested[@]}"; do
         case "$component" in
-            zsh|powerlevel10k|uv|keychain|zoxide|fzf|ripgrep|bat-fd|direnv|docker|nvidia|kubectl|minikube|clean) ;;
+            zsh|powerlevel10k|uv|keychain|zoxide|fzf|ripgrep|bat-fd|direnv|docker|nvidia|kubectl|minikube|clean|rtk|skills-cli|ponytail) ;;
             *) printf 'Unknown component: %s\n' "$component" >&2; exit 2 ;;
         esac
     done
+fi
+declare -a DEVBOX_AGENT_TARGETS_ARRAY=()
+if [[ -n "$BOOTSTRAP_AGENT_TARGETS" ]]; then
+    if (( UPGRADE_ONLY || PREFLIGHT_ONLY || DOCTOR_ONLY )); then
+        echo '--agents is only supported for installation.' >&2; exit 2
+    fi
+    if [[ -n "$ONLY_COMPONENTS" && ",$ONLY_COMPONENTS," != *,rtk,* && ",$ONLY_COMPONENTS," != *,ponytail,* ]]; then
+        echo '--agents requires RTK or Ponytail in --only.' >&2; exit 2
+    fi
+    if [[ ",$BOOTSTRAP_AGENT_TARGETS," == *,,* ]]; then
+        echo 'Agent targets must be non-empty comma-separated names.' >&2; exit 2
+    fi
+    IFS=',' read -r -a DEVBOX_AGENT_TARGETS_ARRAY <<< "$BOOTSTRAP_AGENT_TARGETS"
+    declare -A seen_agent=()
+    for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
+        case "$agent" in claude|codex|copilot|opencode|gemini) ;; *)
+            echo "Unsupported agent target: $agent" >&2; exit 2 ;;
+        esac
+        if [[ -n "${seen_agent[$agent]:-}" ]]; then
+            echo "Duplicate agent target: $agent" >&2; exit 2
+        fi
+        seen_agent[$agent]=1
+    done
+fi
+if [[ ",$ONLY_COMPONENTS," == *,ponytail,* && ${#DEVBOX_AGENT_TARGETS_ARRAY[@]} -eq 0 && "${UPGRADE_ONLY}" != 1 ]]; then
+    echo 'Ponytail requires --agents (e.g. --agents codex,claude).' >&2; exit 2
 fi
 if (( UPGRADE_ONLY && (PREFLIGHT_ONLY || DOCTOR_ONLY) )); then
     echo '--upgrade cannot be combined with --preflight or --doctor.' >&2
@@ -192,6 +230,20 @@ verify_component() {
             verify_binary "$component" bat batcat || return 1
             verify_binary "$component" fd fdfind || return 1 ;;
         direnv) verify_binary "$component" direnv || return 1 ;;
+        rtk)
+            verify_binary "$component" rtk || return 1
+            local rtk_exe
+            rtk_exe="$(command -v rtk || true)"
+            [[ -n "$rtk_exe" ]] || rtk_exe="$HOME/.local/bin/rtk"
+            "$rtk_exe" gain >/dev/null 2>&1 || { die 'RTK is not rtk-ai Token Killer'; return 1; } ;;
+        skills-cli) verify_binary "$component" skills || return 1 ;;
+        ponytail)
+            local agent
+            for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
+                [[ -s "$HOME/.local/state/devbox-bootstrap/agent-extensions/ponytail-$agent" ]] || {
+                    die "Ponytail integration marker absent for $agent"; return 1;
+                }
+            done ;;
         docker) verify_binary "$component" docker || return 1 ;;
         nvidia) verify_binary "$component" nvidia-ctk || return 1 ;;
         minikube) verify_binary "$component" minikube || return 1 ;;
@@ -287,7 +339,7 @@ run_component() {
     else
         verify_component "$component"
         case "$component" in
-            fzf|direnv|zoxide|keychain|zsh|powerlevel10k|nvidia)
+            fzf|direnv|zoxide|keychain|zsh|powerlevel10k|nvidia|ponytail)
                 COMPONENT_STATUS["$component"]=CONFIGURED ;;
             *) COMPONENT_STATUS["$component"]=INSTALLED ;;
         esac
@@ -323,6 +375,9 @@ run_component nvidia 'Install NVIDIA Container Toolkit?' nvidia-container-toolki
 run_component kubectl 'Install kubectl?' k8s.sh
 run_component minikube 'Install Minikube (local Kubernetes)?' minikube.sh
 run_component direnv 'Install direnv?' direnv.sh
+run_component rtk 'Install RTK (token optimizer)?' rtk.sh
+run_component skills-cli 'Install Skills CLI (Node.js required)?' skills-cli.sh
+run_component ponytail 'Install Ponytail for selected agents?' ponytail.sh
 run_component clean 'Run apt autoremove/autoclean?' clean.sh
 
 if (( BOOTSTRAP_DRY_RUN )); then

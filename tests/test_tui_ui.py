@@ -14,6 +14,7 @@ from prompt_toolkit.layout import HSplit, VSplit, Window
 from prompt_toolkit.output import DummyOutput
 
 from tui.app import DevboxTUI
+from tui.catalog import ORDER
 from tui.ui import Entry, KeyboardList
 
 
@@ -63,7 +64,7 @@ class LayoutTests(unittest.TestCase):
         app.selector.toggle()
         self.assertEqual(app.selector.current_values, ["uv"])
         app.selector.set_query("")
-        self.assertEqual(len(app.selector.visible), 13)
+        self.assertEqual(len(app.selector.visible), len(ORDER))
         self.assertEqual(app.selector.current_values, ["uv"])
 
     def test_executing_without_percent_metric_uses_counts(self):

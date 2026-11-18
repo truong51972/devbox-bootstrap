@@ -108,6 +108,36 @@ doctor_main() {
     fi
     doctor_bin Minikube minikube
 
+    local rtk_exe=''
+    rtk_exe="$(command -v rtk || true)"
+    if [[ -z "$rtk_exe" && -x "$HOME/.local/bin/rtk" ]]; then
+        rtk_exe="$HOME/.local/bin/rtk"
+    fi
+    if [[ -n "$rtk_exe" ]]; then
+        if "$rtk_exe" gain >/dev/null 2>&1; then
+            log "[OK]   RTK: rtk-ai token optimizer available ($rtk_exe)"
+            log '[NOTE] RTK agent hook integration is not verified by Doctor.'
+        else
+            warn '[!!]   RTK: binary exists but rtk gain failed (possibly another project).'
+            problems=$((problems+1))
+        fi
+    else
+        log '[--]   RTK: not installed'
+    fi
+    doctor_bin 'Skills CLI' skills
+    local marker_dir="$HOME/.local/state/devbox-bootstrap/agent-extensions"
+    local marker found_ponytail=0
+    for marker in "$marker_dir"/ponytail-*; do
+        [[ -f "$marker" ]] || continue
+        found_ponytail=1
+        log "[NOTE] Ponytail: install recorded for ${marker##*/ponytail-} (activation unverified)"
+    done
+    if (( ! found_ponytail )); then
+        log '[--]   Ponytail: no Devbox-managed integrations recorded'
+    else
+        log '[NOTE] Ponytail status is a receipt; verify activation inside each agent.'
+    fi
+
     if (( problems > 0 )); then
         warn "Doctor detected $problems functional issue(s)."
         return 1

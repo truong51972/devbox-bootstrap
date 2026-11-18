@@ -11,13 +11,24 @@ STATE_ROOT = Path.home() / ".local/state/devbox-bootstrap"
 FINAL_STATES = {"INSTALLED", "CONFIGURED", "UPDATED", "UP_TO_DATE", "SKIPPED", "FAILED", "PLANNED", "NOT_RUN"}
 
 
-def build_command(action: str, selected: list[str], *, dry_run: bool = False) -> list[str]:
+AGENTS = ("claude", "codex", "copilot", "opencode", "gemini")
+
+
+def build_command(action: str, selected: list[str], *, dry_run: bool = False,
+                  agents: list[str] | None = None) -> list[str]:
     if action == "update":
         return ["bash", str(ROOT / "bin/devbox"), "--update"]
     if action in {"doctor", "preflight"}:
         return ["bash", str(ROOT / "setup-ubuntu.sh"), f"--{action}"]
     if action not in {"install", "upgrade"}:
         raise ValueError(f"Unknown action: {action}")
+    targets = list(agents or [])
+    if len(targets) != len(set(targets)) or any(agent not in AGENTS for agent in targets):
+        raise ValueError("Unsupported or duplicate coding agent target.")
+    if targets and (action != "install" or not ({"rtk", "ponytail"} & set(selected))):
+        raise ValueError("Agent targets require installing RTK or Ponytail.")
+    if action == "install" and "ponytail" in selected and not targets:
+        raise ValueError("Select at least one agent target for Ponytail.")
     allowed = {code for code, _ in COMPONENTS}
     if not selected or any(item not in allowed for item in selected):
         raise ValueError("Select at least one valid component.")
@@ -27,6 +38,8 @@ def build_command(action: str, selected: list[str], *, dry_run: bool = False) ->
     if dry_run:
         cmd.append("--dry-run")
     cmd.extend(["--only", ",".join(selected)])
+    if targets:
+        cmd.extend(["--agents", ",".join(targets)])
     return cmd
 
 

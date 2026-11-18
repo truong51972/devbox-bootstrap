@@ -135,6 +135,71 @@ Requires Ubuntu, Bash, an interactive terminal, network access, and `sudo` privi
 
 Each optional component is prompted separately and defaults to **No**. Powerlevel10k is offered only when Zsh is available; NVIDIA Toolkit only when Docker is available. Minikube is a separate optional installer. Configuration is written to the selected shell (`~/.zshrc` or `~/.bashrc`). The installer preserves an existing `~/.p10k.zsh` instead of overwriting it, and avoids repeating marked configuration blocks.
 
+## AI agent extensions (P0)
+
+Devbox offers three optional, **user-scoped** components: **RTK** (rtk-ai token
+optimizer), **Skills CLI** (Vercel Labs `skills` manager), and **Ponytail**
+(DietrichGebert upstream plugins). No agent hooks or plugins are enabled
+unless you explicitly select targets in the TUI confirmation screen or pass
+`--agents` from the Bash CLI.
+
+```bash
+# Select components and target agents interactively in the TUI:
+devbox
+
+# Scripted examples:
+devbox --only rtk,skills-cli,ponytail --agents codex,claude
+devbox --only rtk --agents codex,opencode
+devbox --only skills-cli
+devbox --dry-run --only rtk,ponytail --agents codex
+
+# Read-only diagnostics / upgrades:
+devbox --doctor
+devbox --upgrade --only rtk,skills-cli
+
+# Manage actual agent skills with the official manager:
+skills add vercel-labs/agent-skills -g -a codex
+skills list
+skills check
+```
+
+Supported target identifiers: `claude`, `codex`, `copilot`, `opencode`,
+`gemini`. The TUI only offers targets whose CLI is discoverable in the
+current environment. `--agents` requires an RTK or Ponytail install; Ponytail
+requires at least one selected target. With both selected, the same target
+set is applied to both. RTK **without** targets installs only the binary.
+
+**Prerequisites and trust:** Skills CLI requires Node.js >= 22.20 and npm.
+Ponytail's Claude and Codex plugin hooks need Node.js. These dependencies
+are checked, not silently installed. Claude Code plugin installation from the
+non-interactive TUI uses the documented `claude plugin install ... --yes` CLI
+form after adding the marketplace. RTK is installed with its official
+download script into `~/.local/bin`, and its upstream release checksum check
+must succeed; Devbox also verifies `rtk gain` to avoid confusing it with
+an unrelated `rtk` package. Skills CLI is installed through npm under
+`~/.local` (without sudo). Ponytail uses the agent's official marketplace
+or extension commands; those can execute upstream lifecycle hooks. Review
+the upstream repository and plugin permissions before installing.
+
+**Activation and maintenance:** Restart the targeted agents afterward. In
+Codex, open `/hooks`, review and trust Ponytail's lifecycle hooks yourself.
+Devbox stores a Ponytail install receipt under
+`~/.local/state/devbox-bootstrap/agent-extensions/`; the TUI shows
+`Unverified` rather than `Installed` because the receipt does not prove that
+an agent still has its plugin enabled. The Doctor similarly labels receipts as
+`NOTE`, not a successful live integration test. `--doctor` is read-only and cannot validate all
+third-party plugin states. `--upgrade` only updates Devbox-owned RTK and
+Skills CLI installations **with ownership receipts**; any pre-existing
+user-local binaries are preserved and remain externally managed. Ponytail
+updates remain under the agent's own
+plugin manager. This P0 release intentionally does not provide automatic
+uninstall or rollback of agent-owned configuration. Do not assume Devbox
+will remove any external hooks when uninstalling the binary.
+
+Official sources: https://github.com/rtk-ai/rtk ,
+https://github.com/vercel-labs/skills ,
+https://github.com/DietrichGebert/ponytail .
+
 ## CLI tools
 
 Optional tools: `fzf` (interactive selection), `ripgrep` (search file contents), `bat + fd` (view/find files) and `direnv` (per-project environment). Their installer scripts contain short explanations and upstream links in the header comments.
