@@ -130,7 +130,7 @@ doctor_main() {
     for marker in "$marker_dir"/ponytail-*; do
         [[ -f "$marker" ]] || continue
         found_ponytail=1
-        log "[OK]   Ponytail: Devbox installed for ${marker##*/ponytail-} (receipt only)"
+        log "[NOTE] Ponytail: install recorded for ${marker##*/ponytail-} (activation unverified)"
     done
     if (( ! found_ponytail )); then
         log '[--]   Ponytail: no Devbox-managed integrations recorded'

@@ -96,6 +96,9 @@ if [[ -n "$BOOTSTRAP_AGENT_TARGETS" ]]; then
     if [[ -n "$ONLY_COMPONENTS" && ",$ONLY_COMPONENTS," != *,rtk,* && ",$ONLY_COMPONENTS," != *,ponytail,* ]]; then
         echo '--agents requires RTK or Ponytail in --only.' >&2; exit 2
     fi
+    if [[ ",$BOOTSTRAP_AGENT_TARGETS," == *,,* ]]; then
+        echo 'Agent targets must be non-empty comma-separated names.' >&2; exit 2
+    fi
     IFS=',' read -r -a DEVBOX_AGENT_TARGETS_ARRAY <<< "$BOOTSTRAP_AGENT_TARGETS"
     declare -A seen_agent=()
     for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
@@ -108,7 +111,7 @@ if [[ -n "$BOOTSTRAP_AGENT_TARGETS" ]]; then
         seen_agent[$agent]=1
     done
 fi
-if [[ ",$ONLY_COMPONENTS," == *,ponytail,* && ${#DEVBOX_AGENT_TARGETS_ARRAY[@]} -eq 0 && "${BOOTSTRAP_DRY_RUN}" != 1 && "${UPGRADE_ONLY}" != 1 ]]; then
+if [[ ",$ONLY_COMPONENTS," == *,ponytail,* && ${#DEVBOX_AGENT_TARGETS_ARRAY[@]} -eq 0 && "${UPGRADE_ONLY}" != 1 ]]; then
     echo 'Ponytail requires --agents (e.g. --agents codex,claude).' >&2; exit 2
 fi
 if (( UPGRADE_ONLY && (PREFLIGHT_ONLY || DOCTOR_ONLY) )); then

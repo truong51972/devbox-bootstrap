@@ -29,6 +29,7 @@ jobs:
           bash tests/tui-events.sh
           bash tests/tui-confirm.sh
           bash tests/agent-extensions.sh
+          bash tests/agent-extension-installers.sh
       - name: Test Python TUI
         run: |
           python3 -m venv "$RUNNER_TEMP/devbox-tui-venv"

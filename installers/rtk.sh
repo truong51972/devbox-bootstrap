@@ -4,6 +4,12 @@
 # Keep pre-existing installations untouched; only newly installed binaries are owned by Devbox.
 rtk_state="$HOME/.local/state/devbox-bootstrap/managed"
 rtk_receipt="$rtk_state/rtk.sha256"
+# Validate agent availability before downloading the executable.
+for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
+    command -v "$agent" >/dev/null 2>&1 || {
+        die "Cannot configure RTK for $agent: CLI is not on PATH."; return 1;
+    }
+done
 rtk_exe="$(command -v rtk || true)"
 if [[ -z "$rtk_exe" && -x "$HOME/.local/bin/rtk" ]]; then
     rtk_exe="$HOME/.local/bin/rtk"
@@ -35,12 +41,6 @@ else
     chmod 600 "$rtk_receipt"
 fi
 
-# Preflight all selected agents before editing any agent configuration.
-for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
-    command -v "$agent" >/dev/null 2>&1 || {
-        die "Cannot configure RTK for $agent: CLI is not on PATH."; return 1;
-    }
-done
 for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
     case "$agent" in
         claude) agent_bin=claude; init_args=(-g --auto-patch) ;;

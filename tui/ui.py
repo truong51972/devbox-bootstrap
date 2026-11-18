@@ -54,6 +54,7 @@ THEMES = {"minimal": STYLE, "mono": MONO_STYLE}
 STATUS_STYLES = {
     "Installed": "class:installed",
     "Missing": "class:missing",
+    "Unverified": "class:warning",
     "RUNNING": "class:running",
     "QUEUED": "class:muted",
     "PENDING": "class:muted",

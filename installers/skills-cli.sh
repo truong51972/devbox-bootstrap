@@ -37,7 +37,7 @@ else
         die 'Skills CLI verification failed.'; return 1;
     }
     mkdir -p "$receipt_dir"
-    printf '%s\\n' "$target" > "$receipt"
+    printf '%s\n' "$target" > "$receipt"
     chmod 600 "$receipt"
 fi
 log 'Skills CLI ready; install actual skills with: skills add <source> -g -a <agent>'
