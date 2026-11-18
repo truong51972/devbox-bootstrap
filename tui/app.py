@@ -259,8 +259,8 @@ class DevboxTUI:
     AGENT_SCAN_TTL = 60.0
 
     def _set_component_status(self, code: str, value: str) -> None:
-        if self.available.get(code) == value:
-            return
+        # Even an unchanged aggregate may hide newly completed per-agent rows;
+        # the right pane must repaint when each probe finishes.
         self.available[code] = value
         for index, entry in enumerate(self.selector.entries):
             if entry.key == code and entry.status != value:
