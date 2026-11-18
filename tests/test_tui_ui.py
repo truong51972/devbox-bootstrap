@@ -13,7 +13,7 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.layout import HSplit, VSplit, Window
 from prompt_toolkit.output import DummyOutput
 
-from tui.app import DevboxTUI
+from tui.app import DETAIL_PANEL_WIDTH, DevboxTUI
 from tui.catalog import ORDER
 from tui.ui import Entry, KeyboardList
 
@@ -29,6 +29,53 @@ class LayoutTests(unittest.TestCase):
         app.columns = lambda: 120
         self.assertIsInstance(app._home_layout(), VSplit)
         self.assertIsInstance(app._logs_layout(), VSplit)
+
+    def test_right_panel_width_is_fixed_across_selection_changes(self):
+        # All wide screens should reserve the same number of columns for details.
+        # A longer description or log path must wrap, not move the divider.
+        app = DevboxTUI()
+        app.columns = lambda: 120
+        app.rows = lambda: 35
+
+        for layout_getter, widget in (
+            (app._home_layout, app.menu),
+            (app._selection_layout, app.selector),
+            (app._logs_layout, app.log_files),
+        ):
+            with self.subTest(layout=layout_getter.__name__):
+                layout = layout_getter()
+                self.assertIsInstance(layout, VSplit)
+                panel = layout.children[-1]
+                self.assertIsInstance(panel, Window)
+                self.assertEqual(
+                    (panel.width.min, panel.width.preferred, panel.width.max),
+                    (DETAIL_PANEL_WIDTH,) * 3,
+                )
+                self.assertTrue(panel.wrap_lines)
+                self.assertEqual(layout.padding, 1)
+
+                # Simulate several cursor moves: neither pane is reconstructed
+                # and content length must not alter the fixed panel dimension.
+                for _ in range(min(5, len(widget.visible))):
+                    widget.move(1)
+                    self.assertIs(layout_getter(), layout)
+                    self.assertIs(layout.children[-1], panel)
+                    self.assertEqual(panel.width.preferred, DETAIL_PANEL_WIDTH)
+
+    def test_fixed_panel_preserves_responsive_breakpoints(self):
+        app = DevboxTUI()
+        for columns, rows, selection_type, home_type, logs_type in (
+            (94, 35, VSplit, VSplit, VSplit),
+            (120, 35, VSplit, VSplit, VSplit),
+            (80, 35, HSplit, HSplit, Window),
+            (58, 20, Window, Window, Window),
+        ):
+            with self.subTest(columns=columns, rows=rows):
+                app.columns = lambda c=columns: c
+                app.rows = lambda r=rows: r
+                self.assertIsInstance(app._selection_layout(), selection_type)
+                self.assertIsInstance(app._home_layout(), home_type)
+                self.assertIsInstance(app._logs_layout(), logs_type)
 
     def test_visual_focus_differs_from_selected_items(self):
         app = DevboxTUI()

@@ -32,6 +32,8 @@ from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, inventory, with
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
 
 FINISHED_STATES = FINAL_STATES
+# Stable width across Home, Components and History; remaining columns go to the list.
+DETAIL_PANEL_WIDTH = 42
 MENU = (
     ("install", "Install components"),
     ("upgrade", "Upgrade components"),
@@ -299,10 +301,10 @@ class DevboxTUI:
         if hasattr(self, "app"):
             self.app.invalidate()
 
-    def _text(self, render, *, height=None):
+    def _text(self, render, *, height=None, width=None):
         return Window(
             content=FormattedTextControl(render, focusable=False, show_cursor=False),
-            height=height, wrap_lines=True, style="class:body",
+            height=height, width=width, wrap_lines=True, style="class:body",
         )
 
     def _divider(self):
@@ -413,8 +415,8 @@ class DevboxTUI:
         if self.columns() >= 94:
             return self._layout("home-wide", lambda: VSplit([
                 self.menu.window, self._divider_v(),
-                self._text(self._home_details),
-            ], padding=2))
+                self._text(self._home_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
+            ], padding=1))
         if self.rows() >= 26:
             return self._layout("home-medium", lambda: HSplit([
                 self.menu.window, self._divider(),
@@ -426,7 +428,7 @@ class DevboxTUI:
         if self.columns() >= 94:
             return self._layout("select-wide", lambda: VSplit([
                 self.selector.window, self._divider_v(),
-                self._text(self._component_details),
+                self._text(self._component_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
             ], padding=1))
         if self.rows() >= 25 and self.columns() >= 64:
             return self._layout("select-medium", lambda: HSplit([
@@ -469,7 +471,7 @@ class DevboxTUI:
         if self.columns() >= 94:
             return self._layout("logs-wide", lambda: VSplit([
                 self.log_files.window, self._divider_v(),
-                self._text(self._history_details),
+                self._text(self._history_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
             ], padding=1))
         return self.log_files.window
 
