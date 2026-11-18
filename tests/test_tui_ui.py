@@ -51,7 +51,7 @@ class LayoutTests(unittest.TestCase):
                     (panel.width.min, panel.width.preferred, panel.width.max),
                     (DETAIL_PANEL_WIDTH,) * 3,
                 )
-                self.assertTrue(panel.wrap_lines)
+                self.assertTrue(panel.wrap_lines())
                 self.assertEqual(layout.padding, 1)
 
                 # Simulate several cursor moves: neither pane is reconstructed
