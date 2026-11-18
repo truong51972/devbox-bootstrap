@@ -272,25 +272,45 @@ class KeyboardList:
         values = self.visible
         if not values:
             return [("class:muted", "  " + self.empty_text)]
+
         last_group = None
-        wide = self.get_columns() >= 105
+        width = max(1, self.get_columns())
+        content_width = max(1, width - 2)  # leave a small right gutter
         for i, entry in enumerate(values):
             if entry.group and entry.group != last_group:
                 if fragments:
                     fragments.append(("", "\n"))
                 fragments.append(("class:section", f"  {entry.group}\n"))
                 last_group = entry.group
+
             active = i == self.index
             prefix = "[x]" if entry.key in self.selected and self.multiple else (
                 "[ ]" if self.multiple else "   "
             )
             marker = ">" if active else " "
-            text = f" {marker} {prefix} {entry.label}"
-            if wide and entry.status:
-                text = f"{text:<34} {entry.status}"
-            fragments.append(("class:focus" if active else
-                              "class:checked" if entry.key in self.selected else
-                              "class:body", text + "\n"))
+            start = f" {marker} {prefix} "
+            # Never let the status column crowd out the label on narrow panes.
+            show_status = bool(entry.status and width >= 43)
+            reserved = len(entry.status) + 2 if show_status else 0
+            label_width = max(1, content_width - len(start) - reserved)
+            label = entry.label
+            if len(label) > label_width:
+                label = label[:max(0, label_width - 1)] + "…"
+
+            row_style = ("class:focus" if active else
+                         "class:checked" if entry.key in self.selected else
+                         "class:body")
+            text = start + label
+            if show_status:
+                gap = max(2, content_width - len(text) - len(entry.status))
+                fragments.append((row_style, text + " " * gap))
+                fragments.append((
+                    "class:focus" if active else
+                    STATUS_STYLES.get(entry.status, "class:muted"),
+                    entry.status + "\n",
+                ))
+            else:
+                fragments.append((row_style, text + "\n"))
         return fragments
 
 
