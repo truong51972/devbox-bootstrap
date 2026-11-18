@@ -43,11 +43,11 @@ fi
 
 for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
     case "$agent" in
-        claude) agent_bin=claude; init_args=(-g --auto-patch) ;;
-        codex) agent_bin=codex; init_args=(-g --codex) ;;
-        copilot) agent_bin=copilot; init_args=(-g --copilot) ;;
-        opencode) agent_bin=opencode; init_args=(-g --opencode) ;;
-        gemini) agent_bin=gemini; init_args=(-g --gemini) ;;
+        claude) init_args=(-g --auto-patch) ;;
+        codex) init_args=(-g --codex) ;;
+        copilot) init_args=(-g --copilot) ;;
+        opencode) init_args=(-g --opencode) ;;
+        gemini) init_args=(-g --gemini) ;;
         *) die "Unsupported RTK target: $agent"; return 1 ;;
     esac
     log "Configuring RTK upstream integration for $agent"
