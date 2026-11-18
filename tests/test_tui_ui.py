@@ -136,12 +136,12 @@ class LayoutTests(unittest.TestCase):
         # rows and entries with widely differing label lengths.
         rows = "".join(text for _, text in app.selector.render()).splitlines()
         states = ("Installed", "Missing", "Unverified")
-        positions = [
-            row.index(status) for row in rows
+        end_columns = [
+            row.index(status) + len(status) for row in rows
             for status in states if status in row
         ]
-        self.assertTrue(positions)
-        self.assertEqual(len(set(positions)), 1)
+        self.assertTrue(end_columns)
+        self.assertEqual(len(set(end_columns)), 1)
         self.assertLess(max(len(row) for row in rows), app.selector.get_columns())
 
     def test_details_show_real_selection_and_inventory(self):
