@@ -11,6 +11,8 @@ from unittest.mock import patch
 from prompt_toolkit.application.current import create_app_session
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.layout import HSplit, VSplit, Window
+from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+from prompt_toolkit.layout.screen import Screen, WritePosition
 from prompt_toolkit.output import DummyOutput
 
 from tui.app import DETAIL_PANEL_WIDTH, DevboxTUI
@@ -61,6 +63,40 @@ class LayoutTests(unittest.TestCase):
                     self.assertIs(layout_getter(), layout)
                     self.assertIs(layout.children[-1], panel)
                     self.assertEqual(panel.width.preferred, DETAIL_PANEL_WIDTH)
+
+    def test_wide_separator_does_not_shift_on_cursor_navigation(self):
+        # Exercise prompt_toolkit's actual column allocator, not only the
+        # declared Window dimension. Long details must never move the divider.
+        app = DevboxTUI()
+        app.open_menu()
+        for columns in (94, 120):
+            app.columns = lambda c=columns: c
+            app.rows = lambda: 35
+            layout = app._selection_layout()
+            divider_positions = []
+            for key in ("zsh", "docker", "ponytail"):
+                app.selector.index = next(
+                    i for i, entry in enumerate(app.selector.visible)
+                    if entry.key == key
+                )
+                screen = Screen(initial_width=columns, initial_height=24)
+                layout.write_to_screen(
+                    screen, MouseHandlers(),
+                    WritePosition(0, 0, columns, 24),
+                    parent_style="", erase_bg=True, z_index=None,
+                )
+                dividers = [
+                    x for x, cell in screen.data_buffer[0].items()
+                    if cell.char == "│"
+                ]
+                self.assertEqual(len(dividers), 1)
+                divider_positions.append(dividers[0])
+            with self.subTest(columns=columns):
+                self.assertEqual(len(set(divider_positions)), 1)
+                self.assertEqual(
+                    divider_positions[0],
+                    columns - DETAIL_PANEL_WIDTH - 2,
+                )
 
     def test_fixed_panel_preserves_responsive_breakpoints(self):
         app = DevboxTUI()
