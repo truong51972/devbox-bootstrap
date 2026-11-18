@@ -236,6 +236,71 @@ upgrade_minikube() {
     upgrade_binary minikube "$latest" "$url" "$installed"
 }
 
+# RTK is only self-updated when Devbox owns the user-local binary.
+upgrade_rtk() {
+    local binary="$HOME/.local/bin/rtk" before after tmp
+    if [[ ! -x "$binary" ]]; then
+        if command -v rtk >/dev/null 2>&1; then
+            warn 'RTK is externally managed; update it with its package manager.'
+            UPGRADE_BLOCKED=1
+        fi
+        return 0
+    fi
+    UPGRADE_FOUND=1
+    if ! "$binary" gain >/dev/null 2>&1; then
+        warn 'The user-local rtk binary is not the rtk-ai token optimizer.'
+        UPGRADE_BLOCKED=1
+        return 0
+    fi
+    if (( BOOTSTRAP_DRY_RUN )); then
+        log '[dry-run] Would refresh RTK with upstream SHA-256 verification'
+        return 0
+    fi
+    before="$("$binary" --version)"
+    tmp="$(mktemp -d)"
+    if ! upgrade_fetch --connect-timeout 10 \
+        https://raw.githubusercontent.com/rtk-ai/rtk/master/install.sh -o "$tmp/install.sh"; then
+        rm -rf -- "$tmp"
+        die 'Unable to download RTK updater.'; return 1
+    fi
+    if ! RTK_SKIP_CHECKSUM=0 RTK_INSTALL_DIR="$HOME/.local/bin" sh "$tmp/install.sh"; then
+        rm -rf -- "$tmp"
+        die 'RTK upgrade failed.'; return 1
+    fi
+    rm -rf -- "$tmp"
+    "$binary" gain >/dev/null 2>&1 || { die 'Upgraded RTK failed identity check.'; return 1; }
+    after="$("$binary" --version)"
+    [[ "$before" == "$after" ]] || UPGRADE_CHANGED=1
+}
+
+upgrade_skills_cli() {
+    local package="$HOME/.local/lib/node_modules/skills/package.json" before after
+    if [[ ! -f "$package" || ! -x "$HOME/.local/bin/skills" ]]; then
+        if command -v skills >/dev/null 2>&1; then
+            warn 'Skills CLI is externally managed; update it with its original manager.'
+            UPGRADE_BLOCKED=1
+        fi
+        return 0
+    fi
+    UPGRADE_FOUND=1
+    if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+        warn 'Skills CLI upgrade requires Node.js and npm.'
+        UPGRADE_BLOCKED=1
+        return 0
+    fi
+    if (( BOOTSTRAP_DRY_RUN )); then
+        log '[dry-run] Would refresh user-local Skills CLI with npm'
+        return 0
+    fi
+    before="$(node -p "require(process.argv[1]).version" "$package")"
+    npm install --global --prefix "$HOME/.local" --no-audit --no-fund skills@latest
+    after="$(node -p "require(process.argv[1]).version" "$package")"
+    "$HOME/.local/bin/skills" --help >/dev/null 2>&1 || {
+        die 'Skills CLI upgrade verification failed.'; return 1;
+    }
+    [[ "$before" == "$after" ]] || UPGRADE_CHANGED=1
+}
+
 upgrade_component() {
     local component="$1"
     UPGRADE_FOUND=0
@@ -265,6 +330,14 @@ upgrade_component() {
         nvidia) upgrade_apt nvidia-container-toolkit ;;
         kubectl) upgrade_kubectl ;;
         minikube) upgrade_minikube ;;
+        rtk) upgrade_rtk ;;
+        skills-cli) upgrade_skills_cli ;;
+        ponytail)
+            if compgen -G "$HOME/.local/state/devbox-bootstrap/agent-extensions/ponytail-*" > /dev/null; then
+                UPGRADE_FOUND=1
+                UPGRADE_BLOCKED=1
+                warn 'Ponytail is managed by each agent. Update it using that agent plugin manager.'
+            fi ;;
         clean)
             log 'APT housekeeping is not an upgradeable tool.'
             ;;
@@ -292,7 +365,7 @@ upgrade_main() {
     if (( BOOTSTRAP_DRY_RUN )); then
         log '[dry-run] No package lists, downloads or files will be changed.'
     fi
-    for component in zsh powerlevel10k uv keychain zoxide fzf ripgrep bat-fd docker nvidia kubectl minikube direnv; do
+    for component in zsh powerlevel10k uv keychain zoxide fzf ripgrep bat-fd docker nvidia kubectl minikube direnv rtk skills-cli ponytail; do
         if [[ -n "$ONLY_COMPONENTS" && ",$ONLY_COMPONENTS," != *",$component,"* ]]; then
             continue
         fi

@@ -29,6 +29,31 @@ class TUIBasicTests(unittest.TestCase):
         )
         self.assertEqual(build_command("update", []), ["bash", str(ROOT / "bin/devbox"), "--update"])
 
+    def test_agent_target_dispatch_and_validation(self):
+        self.assertEqual(
+            build_command("install", ["rtk", "ponytail"], agents=["codex", "claude"]),
+            ["bash", str(ROOT / "setup-ubuntu.sh"), "--only", "rtk,ponytail",
+             "--agents", "codex,claude"],
+        )
+        with self.assertRaisesRegex(ValueError, "Select at least one"):
+            build_command("install", ["ponytail"])
+        with self.assertRaisesRegex(ValueError, "Unsupported or duplicate"):
+            build_command("install", ["rtk"], agents=["codex", "codex"])
+        with self.assertRaisesRegex(ValueError, "require installing"):
+            build_command("install", ["skills-cli"], agents=["claude"])
+        with self.assertRaisesRegex(ValueError, "require installing"):
+            build_command("upgrade", ["rtk"], agents=["codex"])
+
+    def test_ponytail_cannot_start_without_explicit_agent(self):
+        app = DevboxTUI()
+        app.open_menu()
+        app.selector.current_values = ["ponytail"]
+        app.confirm_selection()
+        self.assertEqual(app.screen, "confirm")
+        app.start("install", ["ponytail"])
+        self.assertFalse(app.busy)
+        self.assertIn("Select at least one agent", app.message)
+
     def test_application_constructs_and_preview_toggle(self):
         app = DevboxTUI()
         self.assertEqual(app.screen, "home")
