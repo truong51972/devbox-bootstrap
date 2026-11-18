@@ -6,6 +6,7 @@ permission model and on-disk logs remain unchanged.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timezone
 from functools import lru_cache
 import os
@@ -13,6 +14,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 
 from prompt_toolkit import Application
 from prompt_toolkit.application import in_terminal
@@ -28,8 +30,8 @@ from tui.backend import (
     ROOT, STATE_ROOT, FINAL_STATES, build_command, log_tail, log_preview,
     read_events,
 )
-from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, inventory, with_dependencies
-from tui.agent_status import probe_ponytail
+from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, installed, inventory, with_dependencies
+from tui.agent_status import AGENTS, LABELS, discover_agents, probe_agent, summary as ponytail_summary
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
 
 FINISHED_STATES = FINAL_STATES
@@ -108,6 +110,7 @@ COMPONENT SELECTION
   a / n              Select visible / clear all
   /                  Filter by tool or group
   i                  Show full component details
+  r                  Refresh agent plugin inventory
   Esc (in filter)    Clear filter and return to list
 
 CONFIRMATION
@@ -136,8 +139,11 @@ class DevboxTUI:
         self.current_action = ""
         self.selected: list[str] = []
         self.auto_added: list[str] = []
-        self.ponytail_agents = probe_ponytail()
-        self.available = inventory(self.ponytail_agents)
+        # Discovery is PATH-only. No external CLI runs during TUI construction.
+        self.ponytail_agents = discover_agents()
+        self.available = inventory(self.ponytail_agents, quick=True)
+        self._agent_scan_task: asyncio.Task[None] | None = None
+        self._agent_scan_completed_at = 0.0
         self.status: dict[str, str] = {code: "--" for code in ORDER}
         self.busy = False
         self.dry_run = False
@@ -249,6 +255,69 @@ class DevboxTUI:
             return max(1, self.columns() - DETAIL_PANEL_WIDTH - 3)
         return self.columns()
 
+    AGENT_SCAN_TTL = 60.0
+
+    def _set_component_status(self, code: str, value: str) -> None:
+        self.available[code] = value
+        for index, entry in enumerate(self.selector.entries):
+            if entry.key == code and entry.status != value:
+                self.selector.entries[index] = replace(entry, status=value)
+                break
+        self._invalidate()
+
+    def _refresh_agent_status(self) -> None:
+        self._schedule_agent_scan(force=True)
+
+    def _schedule_agent_scan(self, *, force: bool = False) -> None:
+        """Start lazy read-only checks; never block the event loop or redraw."""
+        if self._agent_scan_task is not None and not self._agent_scan_task.done():
+            if force:
+                self._notice("Agent status check already running.")
+            return
+        if (not force and self._agent_scan_completed_at
+                and time.monotonic() - self._agent_scan_completed_at < self.AGENT_SCAN_TTL):
+            return
+
+        self.ponytail_agents = discover_agents()
+        self._set_component_status("ponytail", ponytail_summary(self.ponytail_agents))
+        self._set_component_status(
+            "rtk", "Unverified" if shutil.which("rtk") or
+            (Path.home() / ".local/bin/rtk").is_file() else "Missing",
+        )
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # Headless/unit tests may manipulate the TUI outside an event loop.
+            return
+        self._agent_scan_task = loop.create_task(self._scan_agent_status())
+
+    async def _scan_agent_status(self) -> None:
+        """Run bounded blocking checks concurrently in worker threads."""
+        async def check_agent(agent: str) -> None:
+            try:
+                state = await asyncio.to_thread(probe_agent, agent)
+            except Exception:
+                state = "Unverified"
+            self.ponytail_agents[agent] = state
+            self._set_component_status("ponytail", ponytail_summary(self.ponytail_agents))
+
+        async def check_rtk() -> None:
+            try:
+                valid = await asyncio.to_thread(installed, "rtk")
+            except Exception:
+                valid = False
+            self._set_component_status("rtk", "Installed" if valid else "Missing")
+
+        tasks = [
+            check_agent(agent) for agent in AGENTS
+            if self.ponytail_agents.get(agent) == "Checking"
+        ]
+        tasks.append(check_rtk())
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            self._agent_scan_completed_at = time.monotonic()
+
     def _make_selector(self) -> KeyboardList:
         # Display components by category without changing dependency/install order.
         names = dict(COMPONENTS)
@@ -272,6 +341,7 @@ class DevboxTUI:
             on_change=self._invalidate,
             on_filter=self._begin_filter,
             on_details=self._show_component_info,
+            on_refresh=self._refresh_agent_status,
             get_columns=self._component_list_width,
         )
 
@@ -338,7 +408,7 @@ class DevboxTUI:
     def _page(self, title: str, body, shortcut: str):
         compact = {
             "Main menu": "↑↓ Move  Enter Open  t Theme  ? Help  q Quit",
-            "Components": "↑↓ Move  Space Toggle  / Filter  i Info  Enter Next",
+            "Components": "↑↓ Move  Space Toggle  / Filter  i Info  r Refresh  Enter Next",
             "Confirm": "Space Options  d Dry-run  Enter Run  Esc Back",
             "Execution": "l Expand log  Exit locked",
             "Result": "l Log  Enter Home  Esc Back",
@@ -385,7 +455,7 @@ class DevboxTUI:
                 DynamicContainer(self._selection_layout),
                 DynamicContainer(lambda: self._filter_layout()),
             ]),
-            "↑↓ Move   Space Select   a All   n None   / Filter   i Info   Enter Next   Esc Back",
+            "↑↓ Move   Space Select   a All   n None   / Filter   i Info   r Refresh   Enter Next   Esc Back",
         )
         self.views["confirm"] = self._page(
             "Confirm", DynamicContainer(self._confirm_layout),
@@ -555,14 +625,13 @@ class DevboxTUI:
         if item.key == "ponytail":
             out.append(("class:section", "\n  AGENT INTEGRATIONS\n"))
             if self.ponytail_agents:
-                for agent, state in self.ponytail_agents.items():
+                for agent in AGENTS:
+                    state = self.ponytail_agents.get(agent, "Unavailable")
                     out.extend([
-                        ("class:muted", f"  {agent:<10} "),
+                        ("class:muted", f"  {LABELS[agent]:<12} "),
                         (STATUS_STYLES.get(state, "class:body"), state + "\n"),
                     ])
-            else:
-                out.append(("class:muted", "  No Devbox-managed agents recorded\n"))
-            out.append(("class:muted", "  Active state may require agent restart\n"))
+            out.append(("class:muted", "  r to refresh · CLI inventory only\n"))
         if item.key in WARNINGS:
             out.extend([
                 ("class:section", "\n  NOTE\n"),
@@ -572,6 +641,7 @@ class DevboxTUI:
             ("class:section", "\n  QUICK ACTIONS\n"),
             ("class:muted", "  Space  Select / deselect\n"),
             ("class:muted", "  /      Filter components\n"),
+            ("class:muted", "  r      Refresh agent status\n"),
             ("class:muted", "  Enter  Continue\n"),
         ])
         return out
@@ -778,8 +848,7 @@ class DevboxTUI:
             self.quit()
         elif action in ("install", "upgrade"):
             self.action = action
-            self.ponytail_agents = probe_ponytail()
-            self.available = inventory(self.ponytail_agents)
+            # Preserve last inventory while navigating; refresh lazily after TTL.
             self.selector = self._make_selector()
             self._layout_cache.pop("select-wide", None)
             self._layout_cache.pop("select-medium", None)
@@ -787,6 +856,7 @@ class DevboxTUI:
             self.filter_input.text = ""
             self._notice(f"Select tools to {action}. Space toggles the highlighted row.")
             self.navigate("select", self.selector.window)
+            self._schedule_agent_scan()
         elif action == "logs":
             self.list_history()
         elif action == "update":
@@ -991,6 +1061,9 @@ class DevboxTUI:
                     if self.status[component] in ("RUNNING", "QUEUED"):
                         self.status[component] = ("FAILED" if self.status[component] == "RUNNING"
                                                   else "NOT_RUN")
+            # Changes to agent plugins can occur during install; invalidate the
+            # cached report for the next Components screen, without blocking Result.
+            self._agent_scan_completed_at = 0.0
             self._render_result()
             self._notice(self.last_result)
             self.navigate("result", self.results_view)

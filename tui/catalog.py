@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from tui.agent_status import probe_ponytail, summary as ponytail_summary
+from tui.agent_status import discover_agents, summary as ponytail_summary
 
 COMPONENTS = (
     ("zsh", "Zsh + Oh My Zsh"),
@@ -72,10 +72,17 @@ def installed(code: str) -> bool:
     return any(executable(name) for name in BINS.get(code, ()))
 
 
-def inventory(ponytail_agents: dict[str, str] | None = None) -> dict[str, str]:
-    """Availability; Ponytail checks agent inventories rather than receipts alone."""
-    result = {code: "Installed" if installed(code) else "Missing" for code in ORDER}
-    states = probe_ponytail() if ponytail_agents is None else ponytail_agents
+def inventory(ponytail_agents: dict[str, str] | None = None,
+              *, quick: bool = False) -> dict[str, str]:
+    """Read-only component inventory; quick mode never starts a subprocess."""
+    result = {}
+    for code in ORDER:
+        if quick and code == "rtk":
+            # Avoid launching rtk gain on the UI thread; verify asynchronously.
+            result[code] = "Unverified" if executable("rtk") else "Missing"
+        else:
+            result[code] = "Installed" if installed(code) else "Missing"
+    states = discover_agents() if ponytail_agents is None else ponytail_agents
     result["ponytail"] = ponytail_summary(states)
     return result
 
