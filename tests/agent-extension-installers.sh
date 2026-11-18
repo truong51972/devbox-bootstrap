@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
-root="$PWD"
 scratch="$(mktemp -d)"
 trap 'rm -rf -- "$scratch"' EXIT
 export HOME="$scratch/home"
