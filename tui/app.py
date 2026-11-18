@@ -144,6 +144,7 @@ class DevboxTUI:
         self.available = inventory(self.ponytail_agents, quick=True)
         self._agent_scan_task: asyncio.Task[None] | None = None
         self._agent_scan_completed_at = 0.0
+        self._agent_scan_generation = 0
         self.status: dict[str, str] = {code: "--" for code in ORDER}
         self.busy = False
         self.dry_run = False
@@ -268,6 +269,14 @@ class DevboxTUI:
     def _refresh_agent_status(self) -> None:
         self._schedule_agent_scan(force=True)
 
+    def _invalidate_agent_scan(self) -> None:
+        """Discard in-flight state after an installer may change plugins."""
+        self._agent_scan_generation += 1
+        self._agent_scan_completed_at = 0.0
+        if self._agent_scan_task is not None and not self._agent_scan_task.done():
+            self._agent_scan_task.cancel()
+        self._agent_scan_task = None
+
     def _schedule_agent_scan(self, *, force: bool = False) -> None:
         """Start lazy read-only checks; never block the event loop or redraw."""
         if self._agent_scan_task is not None and not self._agent_scan_task.done():
@@ -289,15 +298,20 @@ class DevboxTUI:
         except RuntimeError:
             # Headless/unit tests may manipulate the TUI outside an event loop.
             return
-        self._agent_scan_task = loop.create_task(self._scan_agent_status())
+        self._agent_scan_generation += 1
+        self._agent_scan_task = loop.create_task(
+            self._scan_agent_status(self._agent_scan_generation)
+        )
 
-    async def _scan_agent_status(self) -> None:
+    async def _scan_agent_status(self, generation: int) -> None:
         """Run bounded blocking checks concurrently in worker threads."""
         async def check_agent(agent: str) -> None:
             try:
                 state = await asyncio.to_thread(probe_agent, agent)
             except Exception:
                 state = "Unverified"
+            if generation != self._agent_scan_generation:
+                return
             self.ponytail_agents[agent] = state
             self._set_component_status("ponytail", ponytail_summary(self.ponytail_agents))
 
@@ -306,7 +320,8 @@ class DevboxTUI:
                 valid = await asyncio.to_thread(installed, "rtk")
             except Exception:
                 valid = False
-            self._set_component_status("rtk", "Installed" if valid else "Missing")
+            if generation == self._agent_scan_generation:
+                self._set_component_status("rtk", "Installed" if valid else "Missing")
 
         tasks = [
             check_agent(agent) for agent in AGENTS
@@ -316,7 +331,8 @@ class DevboxTUI:
         try:
             await asyncio.gather(*tasks)
         finally:
-            self._agent_scan_completed_at = time.monotonic()
+            if generation == self._agent_scan_generation:
+                self._agent_scan_completed_at = time.monotonic()
 
     def _make_selector(self) -> KeyboardList:
         # Display components by category without changing dependency/install order.
@@ -592,7 +608,9 @@ class DevboxTUI:
                 ("class:muted", "  Selected: "),
                 ("class:body", ("Yes" if selected else "No") + "\n"),
             ]
-            if item.key in WARNINGS:
+            if item.key == "ponytail":
+                out.append(("class:muted", "  Press i for each agent's plugin status\n"))
+            elif item.key in WARNINGS:
                 out.append(("class:warning", "  NOTE: " + WARNINGS[item.key]))
             return out
 
@@ -605,6 +623,19 @@ class DevboxTUI:
             ("class:section", "  COMPONENT DETAILS\n\n"),
             ("class:title", "  " + item.label + "\n"),
             ("class:muted", "  " + (item.group or "OTHER") + "\n\n"),
+        ]
+        # Put per-agent information *first*, where it is visible without
+        # scrolling even on moderately tall terminal windows.
+        if item.key == "ponytail":
+            out.append(("class:section", "  AGENT INTEGRATIONS\n"))
+            for agent in AGENTS:
+                state = self.ponytail_agents.get(agent, "Unavailable")
+                out.extend([
+                    ("class:muted", f"  {LABELS[agent]:<12} "),
+                    (STATUS_STYLES.get(state, "class:body"), state + "\n"),
+                ])
+            out.append(("class:muted", "  r to refresh · CLI inventory only\n\n"))
+        out.extend([
             ("class:section", "  OVERVIEW\n"),
             ("class:muted", "  State: "),
             (status_style, item.status + "\n"),
@@ -616,22 +647,10 @@ class DevboxTUI:
             ("class:body", "  " + item.description + "\n\n"),
             ("class:section", "  INVENTORY\n"),
             ("class:body", f"  {installed_count} installed  ·  {missing_count} missing\n"),
-        ]
+        ])
         if unverified_count or other_count:
             out.append(("class:warning", f"  {unverified_count} unverified  ·  {other_count} other\n"))
-        out.extend([
-            ("class:muted", f"  {selected_count} / {len(self.selector.entries)} selected\n"),
-        ])
-        if item.key == "ponytail":
-            out.append(("class:section", "\n  AGENT INTEGRATIONS\n"))
-            if self.ponytail_agents:
-                for agent in AGENTS:
-                    state = self.ponytail_agents.get(agent, "Unavailable")
-                    out.extend([
-                        ("class:muted", f"  {LABELS[agent]:<12} "),
-                        (STATUS_STYLES.get(state, "class:body"), state + "\n"),
-                    ])
-            out.append(("class:muted", "  r to refresh · CLI inventory only\n"))
+        out.append(("class:muted", f"  {selected_count} / {len(self.selector.entries)} selected\n"))
         if item.key in WARNINGS:
             out.extend([
                 ("class:section", "\n  NOTE\n"),
@@ -1063,7 +1082,7 @@ class DevboxTUI:
                                                   else "NOT_RUN")
             # Changes to agent plugins can occur during install; invalidate the
             # cached report for the next Components screen, without blocking Result.
-            self._agent_scan_completed_at = 0.0
+            self._invalidate_agent_scan()
             self._render_result()
             self._notice(self.last_result)
             self.navigate("result", self.results_view)
