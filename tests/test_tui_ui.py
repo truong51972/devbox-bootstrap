@@ -113,6 +113,51 @@ class LayoutTests(unittest.TestCase):
                 self.assertIsInstance(app._home_layout(), home_type)
                 self.assertIsInstance(app._logs_layout(), logs_type)
 
+    def test_component_groups_appear_once_and_are_contiguous(self):
+        app = DevboxTUI()
+        app.open_menu()
+        category_order = [entry.group for entry in app.selector.entries]
+        self.assertEqual(
+            [group for group in dict.fromkeys(category_order)],
+            [group for group, _ in __import__(
+                "tui.catalog", fromlist=["GROUPS"]
+            ).GROUPS],
+        )
+        rendered = "".join(t for _, t in app.selector.render())
+        self.assertEqual(rendered.count("  SHELL\n"), 1)
+        self.assertEqual(rendered.count("  DEVELOPER TOOLS\n"), 1)
+
+    def test_status_aligns_to_list_pane_not_terminal(self):
+        app = DevboxTUI()
+        app.columns = lambda: 120
+        app.open_menu()
+        self.assertEqual(app.selector.get_columns(), 120 - DETAIL_PANEL_WIDTH - 3)
+        # Every displayed state begins at the same column, including focused
+        # rows and entries with widely differing label lengths.
+        rows = "".join(text for _, text in app.selector.render()).splitlines()
+        states = ("Installed", "Missing", "Unverified")
+        end_columns = [
+            row.index(status) + len(status) for row in rows
+            for status in states if status in row
+        ]
+        self.assertTrue(end_columns)
+        self.assertEqual(len(set(end_columns)), 1)
+        self.assertLess(max(len(row) for row in rows), app.selector.get_columns())
+
+    def test_details_show_real_selection_and_inventory(self):
+        app = DevboxTUI()
+        app.columns = lambda: 120
+        app.open_menu()
+        app.selector.current_values = ["uv", "rtk"]
+        app.selector.set_query("rtk")
+        details = "".join(text for _, text in app._component_details())
+        self.assertIn("OVERVIEW", details)
+        self.assertIn("DESCRIPTION", details)
+        self.assertIn("INVENTORY", details)
+        self.assertIn("2 / 16 selected", details)
+        self.assertIn("Selected: Yes", details)
+        self.assertIn("QUICK ACTIONS", details)
+
     def test_visual_focus_differs_from_selected_items(self):
         app = DevboxTUI()
         app.open_menu()

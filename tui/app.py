@@ -29,6 +29,7 @@ from tui.backend import (
     read_events,
 )
 from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, inventory, with_dependencies
+from tui.agent_status import probe_ponytail
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
 
 FINISHED_STATES = FINAL_STATES
@@ -73,7 +74,7 @@ DESCRIPTIONS = {
     "direnv": "Directory-specific environment variables.",
     "rtk": "Token-saving command proxy. Agent hooks are opt-in.",
     "skills-cli": "Vercel Skills CLI; requires Node.js >= 22.20 and npm.",
-    "ponytail": "Upstream Ponytail plugin; receipt status requires agent-side verification.",
+    "ponytail": "Ponytail coding-agent plugin; checked against agent plugin inventory.",
 }
 WARNINGS = {
     "docker": "Docker group access grants root-equivalent privileges.",
@@ -135,7 +136,8 @@ class DevboxTUI:
         self.current_action = ""
         self.selected: list[str] = []
         self.auto_added: list[str] = []
-        self.available = inventory()
+        self.ponytail_agents = probe_ponytail()
+        self.available = inventory(self.ponytail_agents)
         self.status: dict[str, str] = {code: "--" for code in ORDER}
         self.busy = False
         self.dry_run = False
@@ -241,14 +243,28 @@ class DevboxTUI:
             get_columns=self.columns,
         )
 
+    def _component_list_width(self) -> int:
+        """List pane width, excluding the fixed detail pane and VSplit spacing."""
+        if self.columns() >= 94:
+            return max(1, self.columns() - DETAIL_PANEL_WIDTH - 3)
+        return self.columns()
+
     def _make_selector(self) -> KeyboardList:
-        groups = {code: name for name, codes in GROUPS for code in codes}
+        # Display components by category without changing dependency/install order.
+        names = dict(COMPONENTS)
+        entries = [
+            Entry(code, names[code], group, self.available[code],
+                  DESCRIPTIONS.get(code, "Developer tool"))
+            for group, codes in GROUPS for code in codes
+        ]
+        categorized = {entry.key for entry in entries}
+        entries.extend(
+            Entry(code, label, "OTHER", self.available[code],
+                  DESCRIPTIONS.get(code, "Developer tool"))
+            for code, label in COMPONENTS if code not in categorized
+        )
         return KeyboardList(
-            [
-                Entry(code, label, groups.get(code, ""), self.available[code],
-                      DESCRIPTIONS.get(code, "Developer tool"))
-                for code, label in COMPONENTS
-            ],
+            entries,
             multiple=True,
             on_enter=self.confirm_selection,
             on_back=self.back,
@@ -256,7 +272,7 @@ class DevboxTUI:
             on_change=self._invalidate,
             on_filter=self._begin_filter,
             on_details=self._show_component_info,
-            get_columns=self.columns,
+            get_columns=self._component_list_width,
         )
 
     def _make_options(self, entries: list[Entry]) -> KeyboardList:
@@ -486,27 +502,78 @@ class DevboxTUI:
             ("class:muted", "  Enter to continue"),
         ]
 
-    def _component_details(self):
+    def _component_details(self, *, full: bool = False):
         item = self.selector.current
         if item is None:
             return [("class:muted", "  No matching component")]
-        selected = len(self.selector.selected)
-        deps = DEPENDENCIES.get(item.key, ())
+
+        deps = ", ".join(DEPENDENCIES.get(item.key, ())) or "None"
+        selected = item.key in self.selector.selected
+        status_style = STATUS_STYLES.get(item.status, "class:body")
+        if self.columns() < 94 and not full:
+            # The medium stacked preview has just six lines of vertical space.
+            out = [
+                ("class:title", f"  {item.label}\n"),
+                ("class:body", f"  {item.description}\n"),
+                ("class:muted", "  State: "),
+                (status_style, item.status + "\n"),
+                ("class:muted", "  Requires: "),
+                ("class:body", deps + "\n"),
+                ("class:muted", "  Selected: "),
+                ("class:body", ("Yes" if selected else "No") + "\n"),
+            ]
+            if item.key in WARNINGS:
+                out.append(("class:warning", "  NOTE: " + WARNINGS[item.key]))
+            return out
+
+        installed_count = sum(v == "Installed" for v in self.available.values())
+        missing_count = sum(v == "Missing" for v in self.available.values())
+        unverified_count = sum(v == "Unverified" for v in self.available.values())
+        other_count = len(self.available) - installed_count - missing_count - unverified_count
+        selected_count = len(self.selector.selected)
         out = [
             ("class:section", "  COMPONENT DETAILS\n\n"),
-            ("class:title", "  " + item.label + "\n\n"),
-            ("class:body", "  " + item.description + "\n\n"),
+            ("class:title", "  " + item.label + "\n"),
+            ("class:muted", "  " + (item.group or "OTHER") + "\n\n"),
+            ("class:section", "  OVERVIEW\n"),
             ("class:muted", "  State: "),
-            (STATUS_STYLES.get(item.status, "class:body"), item.status + "\n"),
+            (status_style, item.status + "\n"),
+            ("class:muted", "  Selected: "),
+            ("class:body", ("Yes" if selected else "No") + "\n"),
             ("class:muted", "  Requires: "),
-            ("class:body", (", ".join(deps) or "None") + "\n\n"),
-            ("class:muted", f"  {selected} selected"),
+            ("class:body", deps + "\n\n"),
+            ("class:section", "  DESCRIPTION\n"),
+            ("class:body", "  " + item.description + "\n\n"),
+            ("class:section", "  INVENTORY\n"),
+            ("class:body", f"  {installed_count} installed  ·  {missing_count} missing\n"),
         ]
+        if unverified_count or other_count:
+            out.append(("class:warning", f"  {unverified_count} unverified  ·  {other_count} other\n"))
+        out.extend([
+            ("class:muted", f"  {selected_count} / {len(self.selector.entries)} selected\n"),
+        ])
+        if item.key == "ponytail":
+            out.append(("class:section", "\n  AGENT INTEGRATIONS\n"))
+            if self.ponytail_agents:
+                for agent, state in self.ponytail_agents.items():
+                    out.extend([
+                        ("class:muted", f"  {agent:<10} "),
+                        (STATUS_STYLES.get(state, "class:body"), state + "\n"),
+                    ])
+            else:
+                out.append(("class:muted", "  No Devbox-managed agents recorded\n"))
+            out.append(("class:muted", "  Active state may require agent restart\n"))
         if item.key in WARNINGS:
             out.extend([
-                ("class:warning", "\n\n  NOTE  "),
-                ("class:body", WARNINGS[item.key]),
+                ("class:section", "\n  NOTE\n"),
+                ("class:warning", "  " + WARNINGS[item.key] + "\n"),
             ])
+        out.extend([
+            ("class:section", "\n  QUICK ACTIONS\n"),
+            ("class:muted", "  Space  Select / deselect\n"),
+            ("class:muted", "  /      Filter components\n"),
+            ("class:muted", "  Enter  Continue\n"),
+        ])
         return out
 
     def _confirm_tokens(self):
@@ -570,7 +637,7 @@ class DevboxTUI:
         ]
 
     def _show_component_info(self) -> None:
-        self.info_view.text = "".join(text for _style, text in self._component_details())
+        self.info_view.text = "".join(text for _style, text in self._component_details(full=True))
         self.navigate("info", self.info_view)
 
     def _begin_filter(self) -> None:
@@ -711,7 +778,8 @@ class DevboxTUI:
             self.quit()
         elif action in ("install", "upgrade"):
             self.action = action
-            self.available = inventory()
+            self.ponytail_agents = probe_ponytail()
+            self.available = inventory(self.ponytail_agents)
             self.selector = self._make_selector()
             self._layout_cache.pop("select-wide", None)
             self._layout_cache.pop("select-medium", None)
