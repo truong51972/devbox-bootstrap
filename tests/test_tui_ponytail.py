@@ -179,7 +179,7 @@ class PonytailStatusTests(unittest.TestCase):
                 self.assertEqual(len(calls), 4)
 
                 app.selector.set_query("ponytail")
-                details = "".join(t for _, t in app._component_details())
+                details = "".join(t for _, t in app._component_details(full=True))
                 self.assertIn("Claude Code", details)
                 self.assertIn("Codex", details)
                 self.assertIn("Copilot CLI", details)
