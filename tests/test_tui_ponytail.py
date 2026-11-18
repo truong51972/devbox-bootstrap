@@ -1,28 +1,32 @@
-"""Regression tests for read-only Ponytail agent inventory and aggregation."""
+"""Ponytail agent inventory: correctness, discovery and TUI responsiveness."""
 from __future__ import annotations
 
+import asyncio
 import json
-from pathlib import Path
-from tempfile import TemporaryDirectory
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from tui import agent_status
+from tui.app import DevboxTUI
 from tui.catalog import inventory
 
 
 class PonytailStatusTests(unittest.TestCase):
-    def test_claude_json_detects_enabled_and_disabled(self):
+    def test_claude_json_enabled_disabled_and_errors(self):
         self.assertEqual(agent_status._from_json("claude", json.dumps([
-            {"id": "other@misc", "enabled": True},
-            {"id": "ponytail@ponytail", "enabled": True},
+            {"id": "ponytail@ponytail", "enabled": True}
         ])), "Installed")
         self.assertEqual(agent_status._from_json("claude", json.dumps([
-            {"id": "ponytail@ponytail", "enabled": False},
+            {"id": "ponytail@ponytail", "enabled": False}
         ])), "Disabled")
+        self.assertEqual(agent_status._from_json("claude", json.dumps([
+            {"id": "ponytail@ponytail", "enabled": True,
+             "errors": ["plugin failed to load"]}
+        ])), "Unverified")
 
-    def test_codex_only_checks_installed_not_available(self):
+    def test_codex_available_marketplace_is_not_installed(self):
         self.assertEqual(agent_status._from_json("codex", json.dumps({
             "installed": [],
             "available": [{"pluginId": "ponytail@ponytail", "enabled": True}],
@@ -36,16 +40,22 @@ class PonytailStatusTests(unittest.TestCase):
                            "enabled": False, "installed": True}],
         })), "Disabled")
 
-    def test_copilot_json_and_broken_output(self):
-        self.assertEqual(agent_status._from_json("copilot", json.dumps([
-            {"name": "ponytail", "enabled": True}
-        ])), "Installed")
-        self.assertEqual(agent_status._from_json("copilot", "not json"), "Unverified")
+    def test_copilot_json_supports_current_and_previous_shapes(self):
+        for payload in (
+            [{"name": "ponytail", "enabled": True}],
+            {"plugins": [{"name": "ponytail", "enabled": True}]},
+        ):
+            with self.subTest(payload=payload):
+                self.assertEqual(
+                    agent_status._from_json("copilot", json.dumps(payload)),
+                    "Installed",
+                )
+        self.assertEqual(agent_status._from_json("copilot", "{oops"), "Unverified")
         self.assertEqual(agent_status._from_json("codex", json.dumps({
             "available": [{"name": "ponytail"}]
         })), "Unverified")
 
-    def test_text_inventory_and_exact_plugin_name(self):
+    def test_opencode_and_gemini_text_flags(self):
         self.assertEqual(agent_status._from_text(
             "Installed plugins:\n@dietrichgebert/ponytail (latest)\n"
         ), "Installed")
@@ -55,81 +65,149 @@ class PonytailStatusTests(unittest.TestCase):
         self.assertEqual(agent_status._from_text(
             "other-ponytail-utils 1.0\n"
         ), "Missing")
-        self.assertEqual(agent_status._from_text(
-            "No extensions installed\n"
-        ), "Missing")
-
-    def test_gemini_multiline_enabled_flags(self):
         output = (
             "✓ ponytail (5.0)\n"
             "  Path: /home/user/.gemini/extensions/ponytail\n"
             "  Enabled (User): true\n"
-            "  Enabled (Workspace): true\n"
+            "  Enabled (Workspace): false\n"
         )
+        self.assertEqual(agent_status._from_text(output, gemini=True), "Installed")
+        self.assertEqual(agent_status._from_text(
+            output.replace("Enabled (User): true", "Enabled (User): false"),
+            gemini=True,
+        ), "Disabled")
         self.assertEqual(
-            agent_status._from_text(output, gemini=True), "Installed"
-        )
-        self.assertEqual(
-            agent_status._from_text(
-                output.replace("Enabled (Workspace): true",
-                               "Enabled (Workspace): false"),
-                gemini=True,
-            ), "Disabled",
-        )
-        self.assertEqual(
-            agent_status._from_text("✓ ponytail\n", gemini=True),
-            "Unverified",
+            agent_status._from_text("✓ ponytail\n", gemini=True), "Unverified"
         )
 
-    def test_probe_rejects_missing_cli_and_failed_commands(self):
+    def test_discovery_lists_all_agents_without_receipts(self):
+        detected = {"claude", "codex", "opencode"}
+        with patch("tui.agent_status.shutil.which",
+                   side_effect=lambda name: "/bin/" + name if name in detected else None):
+            statuses = agent_status.discover_agents()
+        self.assertEqual(list(statuses), list(agent_status.AGENTS))
+        self.assertEqual(statuses["claude"], "Checking")
+        self.assertEqual(statuses["codex"], "Checking")
+        self.assertEqual(statuses["opencode"], "Checking")
+        self.assertEqual(statuses["gemini"], "Unavailable")
+        self.assertEqual(statuses["copilot"], "Unavailable")
+
+    def test_failed_or_unsupported_queries_never_claim_missing(self):
         with patch("tui.agent_status.shutil.which", return_value=None):
-            self.assertEqual(agent_status.probe_agent("codex"), "Unverified")
+            self.assertEqual(agent_status.probe_agent("codex"), "Unavailable")
         with patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
              patch("tui.agent_status.subprocess.run", return_value=SimpleNamespace(
                  returncode=1, stdout=""
              )):
             self.assertEqual(agent_status.probe_agent("codex"), "Unverified")
+        with patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
+             patch("tui.agent_status.subprocess.run",
+                   side_effect=__import__("subprocess").TimeoutExpired("codex", 2)):
+            self.assertEqual(agent_status.probe_agent("codex"), "Unverified")
 
-    def test_probe_receipts_are_not_equivalent_to_plugin_health(self):
-        with TemporaryDirectory() as temp:
-            state = Path(temp)
-            (state / "ponytail-codex").write_text("2026-11-18")
-            (state / "ponytail-claude").write_text("2026-11-18")
-            (state / "ponytail-unknown").write_text("2026-11-18")
-            statuses = {"codex": "Installed", "claude": "Unverified"}
-            with patch("tui.agent_status.probe_agent",
-                       side_effect=lambda agent: statuses[agent]) as probe:
-                result = agent_status.probe_ponytail(state)
-            self.assertEqual(
-                result, {"claude": "Unverified", "codex": "Installed"}
-            )
-            self.assertEqual(probe.call_count, 2)
-            self.assertEqual(agent_status.summary(result), "Partial")
-
-    def test_summary_states(self):
-        cases = [
+    def test_summary_ignores_missing_cli_but_not_missing_plugins(self):
+        scenarios = [
             ({}, "Missing"),
-            ({"codex": "Installed"}, "Installed"),
-            ({"codex": "Installed", "claude": "Installed"}, "Installed"),
+            ({"codex": "Unavailable"}, "Missing"),
+            ({"codex": "Installed", "claude": "Unavailable"}, "Installed"),
+            ({"codex": "Checking", "claude": "Unavailable"}, "Checking"),
+            ({"codex": "Installed", "claude": "Checking"}, "Checking"),
             ({"codex": "Installed", "claude": "Missing"}, "Partial"),
-            ({"codex": "Installed", "claude": "Unverified"}, "Partial"),
-            ({"codex": "Disabled"}, "Disabled"),
-            ({"codex": "Missing"}, "Missing"),
-            ({"codex": "Unverified"}, "Unverified"),
-            ({"codex": "Disabled", "claude": "Unverified"}, "Unverified"),
+            ({"codex": "Installed", "claude": "Disabled"}, "Partial"),
+            ({"codex": "Missing", "claude": "Unavailable"}, "Missing"),
+            ({"codex": "Unverified", "claude": "Missing"}, "Unverified"),
+            ({"codex": "Disabled", "claude": "Missing"}, "Disabled"),
         ]
-        for states, expected in cases:
-            with self.subTest(states=states):
-                self.assertEqual(agent_status.summary(states), expected)
+        for values, expected in scenarios:
+            with self.subTest(values=values):
+                self.assertEqual(agent_status.summary(values), expected)
 
-    def test_inventory_uses_live_plugin_state_not_receipt(self):
-        with patch("tui.catalog.installed", return_value=False):
-            result = inventory({"codex": "Installed"})
-            self.assertEqual(result["ponytail"], "Installed")
-            result = inventory({"codex": "Unverified"})
-            self.assertEqual(result["ponytail"], "Unverified")
-            result = inventory({"codex": "Disabled"})
-            self.assertEqual(result["ponytail"], "Disabled")
+    def test_quick_inventory_does_not_run_rtk_command(self):
+        with patch("tui.catalog.installed", return_value=False) as installed, \
+             patch("tui.catalog.executable", return_value=True):
+            result = inventory({"codex": "Checking"}, quick=True)
+        self.assertEqual(result["rtk"], "Unverified")
+        self.assertEqual(result["ponytail"], "Checking")
+        self.assertNotIn("rtk", [call.args[0] for call in installed.call_args_list])
+
+    def test_constructor_does_not_probe_any_cli(self):
+        with patch("tui.app.probe_agent",
+                   side_effect=AssertionError("Probe on event loop")), \
+             patch("tui.catalog.subprocess.run",
+                   side_effect=AssertionError("Blocking inventory")):
+            app = DevboxTUI()
+            self.assertIsNotNone(app)
+            app.open_menu()
+            self.assertEqual(app.screen, "select")
+
+    def test_async_scans_all_detected_agents_and_manual_refresh(self):
+        detected = {
+            "claude": "Checking", "codex": "Checking",
+            "copilot": "Unavailable", "opencode": "Unavailable",
+            "gemini": "Unavailable",
+        }
+        calls = []
+
+        def slow_probe(agent):
+            calls.append(agent)
+            time.sleep(0.25)
+            return "Installed" if agent == "claude" else "Missing"
+
+        async def scenario():
+            with patch("tui.app.discover_agents", return_value=detected.copy()), \
+                 patch("tui.app.probe_agent", side_effect=slow_probe), \
+                 patch("tui.app.installed", return_value=False):
+                app = DevboxTUI()
+                start = time.monotonic()
+                app.open_menu()
+                duration = time.monotonic() - start
+                # Old code would block for an entire CLI timeout here.
+                self.assertLess(duration, 0.20)
+                self.assertEqual(app.available["ponytail"], "Checking")
+                self.assertEqual(app.screen, "select")
+                await asyncio.wait_for(app._agent_scan_task, timeout=2)
+                self.assertEqual(app.ponytail_agents["claude"], "Installed")
+                self.assertEqual(app.ponytail_agents["codex"], "Missing")
+                self.assertEqual(app.available["ponytail"], "Partial")
+                self.assertEqual(app.selector.entries[-1].status, "Partial")
+
+                app._schedule_agent_scan()  # Recent result is cached.
+                self.assertEqual(len(calls), 2)
+
+                app._refresh_agent_status()
+                await asyncio.wait_for(app._agent_scan_task, timeout=2)
+                self.assertEqual(len(calls), 4)
+
+                app.selector.set_query("ponytail")
+                details = "".join(t for _, t in app._component_details())
+                self.assertIn("Claude Code", details)
+                self.assertIn("Codex", details)
+                self.assertIn("Copilot CLI", details)
+                self.assertIn("Installed", details)
+                self.assertIn("Missing", details)
+                self.assertIn("Unavailable", details)
+
+        asyncio.run(scenario())
+
+    def test_multiple_installed_agents_without_receipts(self):
+        discovered = {
+            "claude": "Checking", "codex": "Checking", "copilot": "Checking",
+            "opencode": "Unavailable", "gemini": "Unavailable",
+        }
+        async def scenario():
+            with patch("tui.app.discover_agents", return_value=discovered.copy()), \
+                 patch("tui.app.probe_agent", side_effect=lambda agent: {
+                     "claude": "Installed", "codex": "Installed",
+                     "copilot": "Missing",
+                 }[agent]), \
+                 patch("tui.app.installed", return_value=False):
+                app = DevboxTUI()
+                app.open_menu()
+                await asyncio.wait_for(app._agent_scan_task, timeout=2)
+                self.assertEqual(app.available["ponytail"], "Partial")
+                self.assertEqual(app.ponytail_agents["copilot"], "Missing")
+                self.assertEqual(app.ponytail_agents["codex"], "Installed")
+        asyncio.run(scenario())
 
 
 if __name__ == "__main__":
