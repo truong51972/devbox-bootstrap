@@ -154,7 +154,7 @@ class PonytailStatusTests(unittest.TestCase):
             return "Installed" if agent == "claude" else "Missing"
 
         async def scenario():
-            with patch("tui.app.discover_agents", return_value=detected.copy()), \
+            with patch("tui.app.discover_agents", side_effect=lambda: detected.copy()), \
                  patch("tui.app.probe_agent", side_effect=slow_probe), \
                  patch("tui.app.installed", return_value=False):
                 app = DevboxTUI()
