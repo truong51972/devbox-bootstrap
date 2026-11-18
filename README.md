@@ -184,10 +184,14 @@ the upstream repository and plugin permissions before installing.
 **Activation and maintenance:** Restart the targeted agents afterward. In
 Codex, open `/hooks`, review and trust Ponytail's lifecycle hooks yourself.
 Devbox stores a Ponytail install receipt under
-`~/.local/state/devbox-bootstrap/agent-extensions/`; the TUI shows
-`Unverified` rather than `Installed` because the receipt does not prove that
-an agent still has its plugin enabled. The Doctor similarly labels receipts as
-`NOTE`, not a successful live integration test. `--doctor` is read-only and cannot validate all
+`~/.local/state/devbox-bootstrap/agent-extensions/`; the TUI performs a bounded, read-only plugin inventory check for each
+recorded agent. Ponytail shows `Installed` only when all recorded agents report
+the plugin as enabled; `Partial` indicates a mix of enabled and other states,
+and `Disabled`, `Missing`, or `Unverified` describe the remaining cases.
+The details panel lists each agent's status. If the agent CLI cannot be queried
+or times out, Devbox keeps `Unverified` instead of guessing. Reopen Install
+components to refresh the inventory. The Doctor continues to report only
+installation receipts; it is not a live integration check. `--doctor` is read-only and cannot validate all
 third-party plugin states. `--upgrade` only updates Devbox-owned RTK and
 Skills CLI installations **with ownership receipts**; any pre-existing
 user-local binaries are preserved and remain externally managed. Ponytail

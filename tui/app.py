@@ -29,6 +29,7 @@ from tui.backend import (
     read_events,
 )
 from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, inventory, with_dependencies
+from tui.agent_status import probe_ponytail
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
 
 FINISHED_STATES = FINAL_STATES
@@ -73,7 +74,7 @@ DESCRIPTIONS = {
     "direnv": "Directory-specific environment variables.",
     "rtk": "Token-saving command proxy. Agent hooks are opt-in.",
     "skills-cli": "Vercel Skills CLI; requires Node.js >= 22.20 and npm.",
-    "ponytail": "Upstream Ponytail plugin; receipt status requires agent-side verification.",
+    "ponytail": "Ponytail coding-agent plugin; checked against agent plugin inventory.",
 }
 WARNINGS = {
     "docker": "Docker group access grants root-equivalent privileges.",
@@ -135,7 +136,8 @@ class DevboxTUI:
         self.current_action = ""
         self.selected: list[str] = []
         self.auto_added: list[str] = []
-        self.available = inventory()
+        self.ponytail_agents = probe_ponytail()
+        self.available = inventory(self.ponytail_agents)
         self.status: dict[str, str] = {code: "--" for code in ORDER}
         self.busy = False
         self.dry_run = False
@@ -550,6 +552,17 @@ class DevboxTUI:
         out.extend([
             ("class:muted", f"  {selected_count} / {len(self.selector.entries)} selected\n"),
         ])
+        if item.key == "ponytail":
+            out.append(("class:section", "\n  AGENT INTEGRATIONS\n"))
+            if self.ponytail_agents:
+                for agent, state in self.ponytail_agents.items():
+                    out.extend([
+                        ("class:muted", f"  {agent:<10} "),
+                        (STATUS_STYLES.get(state, "class:body"), state + "\n"),
+                    ])
+            else:
+                out.append(("class:muted", "  No Devbox-managed agents recorded\n"))
+            out.append(("class:muted", "  Active state may require agent restart\n"))
         if item.key in WARNINGS:
             out.extend([
                 ("class:section", "\n  NOTE\n"),
@@ -765,7 +778,8 @@ class DevboxTUI:
             self.quit()
         elif action in ("install", "upgrade"):
             self.action = action
-            self.available = inventory()
+            self.ponytail_agents = probe_ponytail()
+            self.available = inventory(self.ponytail_agents)
             self.selector = self._make_selector()
             self._layout_cache.pop("select-wide", None)
             self._layout_cache.pop("select-medium", None)

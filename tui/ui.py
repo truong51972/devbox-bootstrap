@@ -55,6 +55,8 @@ STATUS_STYLES = {
     "Installed": "class:installed",
     "Missing": "class:missing",
     "Unverified": "class:warning",
+    "Partial": "class:warning",
+    "Disabled": "class:warning",
     "RUNNING": "class:running",
     "QUEUED": "class:muted",
     "PENDING": "class:muted",

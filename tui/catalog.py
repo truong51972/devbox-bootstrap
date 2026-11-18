@@ -5,6 +5,8 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from tui.agent_status import probe_ponytail, summary as ponytail_summary
+
 COMPONENTS = (
     ("zsh", "Zsh + Oh My Zsh"),
     ("powerlevel10k", "Powerlevel10k"),
@@ -70,11 +72,11 @@ def installed(code: str) -> bool:
     return any(executable(name) for name in BINS.get(code, ()))
 
 
-def inventory() -> dict[str, str]:
-    """Availability, not a guarantee that a daemon or shell hook is healthy."""
+def inventory(ponytail_agents: dict[str, str] | None = None) -> dict[str, str]:
+    """Availability; Ponytail checks agent inventories rather than receipts alone."""
     result = {code: "Installed" if installed(code) else "Missing" for code in ORDER}
-    if any((Path.home() / ".local/state/devbox-bootstrap/agent-extensions").glob("ponytail-*")):
-        result["ponytail"] = "Unverified"
+    states = probe_ponytail() if ponytail_agents is None else ponytail_agents
+    result["ponytail"] = ponytail_summary(states)
     return result
 
 
