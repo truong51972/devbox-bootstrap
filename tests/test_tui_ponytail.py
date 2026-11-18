@@ -189,6 +189,38 @@ class PonytailStatusTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_install_invalidation_discards_stale_in_flight_result(self):
+        detected = {
+            "claude": "Checking", "codex": "Unavailable",
+            "copilot": "Unavailable", "opencode": "Unavailable",
+            "gemini": "Unavailable",
+        }
+
+        def delayed_agent(_agent):
+            time.sleep(0.15)
+            return "Installed"
+
+        async def scenario():
+            with patch("tui.app.discover_agents",
+                       side_effect=lambda: detected.copy()), \
+                 patch("tui.app.probe_agent", side_effect=delayed_agent), \
+                 patch("tui.app.installed", return_value=False):
+                app = DevboxTUI()
+                app.open_menu()
+                await asyncio.sleep(0.025)
+                app._invalidate_agent_scan()
+                self.assertIsNone(app._agent_scan_task)
+                self.assertEqual(app._agent_scan_completed_at, 0.0)
+                await asyncio.sleep(0.20)
+                # An obsolete probe cannot overwrite a just-installed state
+                # or mark the cache fresh after invalidation.
+                self.assertEqual(app.ponytail_agents["claude"], "Checking")
+                self.assertEqual(app._agent_scan_completed_at, 0.0)
+                app._schedule_agent_scan()
+                await asyncio.wait_for(app._agent_scan_task, timeout=2)
+                self.assertEqual(app.ponytail_agents["claude"], "Installed")
+        asyncio.run(scenario())
+
     def test_multiple_installed_agents_without_receipts(self):
         discovered = {
             "claude": "Checking", "codex": "Checking", "copilot": "Checking",
