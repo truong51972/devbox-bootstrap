@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import shutil
+import subprocess
 
 COMPONENTS = (
     ("zsh", "Zsh + Oh My Zsh"),
@@ -18,12 +19,16 @@ COMPONENTS = (
     ("kubectl", "kubectl"),
     ("minikube", "Minikube"),
     ("direnv", "direnv"),
+    ("rtk", "RTK (token optimizer)"),
+    ("skills-cli", "Skills CLI"),
+    ("ponytail", "Ponytail (agent plugin)"),
 )
 GROUPS = (
     ("SHELL", ("zsh", "powerlevel10k", "keychain")),
     ("DEVELOPER TOOLS", ("uv", "zoxide", "fzf", "ripgrep", "bat-fd", "direnv")),
     ("CONTAINERS", ("docker", "nvidia")),
     ("KUBERNETES", ("kubectl", "minikube")),
+    ("AI AGENT EXTENSIONS", ("rtk", "skills-cli", "ponytail")),
 )
 DEPENDENCIES = {"powerlevel10k": ("zsh",), "nvidia": ("docker",)}
 BINS = {
@@ -32,6 +37,7 @@ BINS = {
     "bat-fd": ("bat", "batcat"), "docker": ("docker",),
     "nvidia": ("nvidia-ctk",), "kubectl": ("kubectl",),
     "minikube": ("minikube",), "direnv": ("direnv",),
+    "rtk": ("rtk",), "skills-cli": ("skills",),
 }
 ORDER = tuple(code for code, _ in COMPONENTS)
 
@@ -45,8 +51,18 @@ def executable(name: str) -> bool:
 
 
 def installed(code: str) -> bool:
+    if code == "ponytail":
+        # Only reflects successful Devbox-managed installs; not arbitrary agent plugins.
+        return any((Path.home() / ".local/state/devbox-bootstrap/agent-extensions").glob("ponytail-*"))
     if code == "powerlevel10k":
         return (Path.home() / "powerlevel10k/powerlevel10k.zsh-theme").is_file()
+    if code == "rtk":
+        executable_path = shutil.which("rtk") or str(Path.home() / ".local/bin/rtk")
+        try:
+            return subprocess.run([executable_path, "gain"], stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL, timeout=2).returncode == 0
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            return False
     if code == "bat-fd":
         return (executable("bat") or executable("batcat")) and (
             executable("fd") or executable("fdfind")
