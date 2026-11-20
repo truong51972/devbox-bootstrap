@@ -1,20 +1,24 @@
-"""Read-only Ponytail status probes for integrations managed by coding agents.
+"""Read-only Ponytail plugin inventory adapters for supported coding-agent CLIs.
 
-Receipts identify which agent Devbox installed for; they are *not* used to
-claim that the plugin is active. Only successful read-only agent inventory
-commands can promote an integration to Installed.
+Discovery only inspects PATH; CLI probes are deliberately synchronous so they
+can be executed in asyncio.to_thread, never on the TUI's event loop. No
+installation receipts are required: manually installed plugins are visible.
 """
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
-from pathlib import Path
 import re
 import shutil
 import subprocess
 
 AGENTS = ("claude", "codex", "copilot", "opencode", "gemini")
-RECEIPT_DIR = Path.home() / ".local/state/devbox-bootstrap/agent-extensions"
+LABELS = {
+    "claude": "Claude Code",
+    "codex": "Codex",
+    "copilot": "Copilot CLI",
+    "opencode": "OpenCode",
+    "gemini": "Gemini CLI",
+}
 _COMMANDS = {
     "claude": ("claude", "plugin", "list", "--json"),
     "codex": ("codex", "plugin", "list", "--json"),
@@ -22,9 +26,16 @@ _COMMANDS = {
     "opencode": ("opencode", "plugin", "list"),
     "gemini": ("gemini", "extensions", "list"),
 }
-# Match Ponytail itself, not an unrelated "ponytail-utils" plugin.
 _PONYTAIL = re.compile(r"(?<![a-z0-9_-])ponytail(?![a-z0-9_-])", re.I)
 _ANSI = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def discover_agents() -> dict[str, str]:
+    """Cheap, non-blocking state for *all* supported agents, with or without receipts."""
+    return {
+        agent: ("Checking" if shutil.which(agent) else "Unavailable")
+        for agent in AGENTS
+    }
 
 
 def _is_ponytail(row: dict) -> bool:
@@ -40,107 +51,100 @@ def _from_json(agent: str, output: str) -> str:
     except (ValueError, TypeError):
         return "Unverified"
     if agent == "codex":
-        # Codex also returns *available* plugins: ignore those.
+        # Codex lists marketplace-available plugins separately from installations.
         rows = payload.get("installed") if isinstance(payload, dict) else None
     else:
         rows = payload if isinstance(payload, list) else (
-            payload.get("plugins") if isinstance(payload, dict) else None
+            payload.get("installed", payload.get("plugins"))
+            if isinstance(payload, dict) else None
         )
     if not isinstance(rows, list):
         return "Unverified"
     matches = [row for row in rows if isinstance(row, dict) and _is_ponytail(row)]
-    if any(row.get("enabled") is not False and row.get("installed") is not False
+    if not matches:
+        return "Missing"
+    if any(row.get("errors") or row.get("errorDetails") for row in matches):
+        return "Unverified"
+    if any(row.get("enabled") is True and row.get("installed") is not False
            for row in matches):
         return "Installed"
-    if matches:
-        return "Disabled" if any(row.get("enabled") is False for row in matches) else "Missing"
-    return "Missing"
+    if any(row.get("enabled") is False for row in matches):
+        return "Disabled"
+    if any(row.get("installed") is False for row in matches):
+        return "Missing"
+    # Installed-only inventories may omit the enabled field.
+    return "Installed"
 
 
 def _from_text(output: str, *, gemini: bool = False) -> str:
     text = _ANSI.sub("", output)
     lines = text.splitlines()
     matches = [
-        index for index, line in enumerate(lines)
+        i for i, line in enumerate(lines)
         if _PONYTAIL.search(line)
         and not line.strip().lower().startswith(("path:", "source:", "id:"))
     ]
     if not matches:
         return "Missing"
-
     if gemini:
-        # Gemini prints a multi-line extension block. Its enabled flags are
-        # below the extension name, not on the same line.
+        # Gemini prints enable flags below the extension name. Any enabled
+        # scope makes it available; both false indicates disabled.
         for index in matches:
             flags = []
             for line in lines[index:index + 12]:
-                matched = re.match(
+                result = re.match(
                     r"\s*Enabled\s*\((User|Workspace)\)\s*:\s*(true|false)",
                     line, re.I,
                 )
-                if matched:
-                    flags.append(matched.group(2).lower() == "true")
-            if flags and all(flags):
+                if result:
+                    flags.append(result.group(2).lower() == "true")
+            if any(flags):
                 return "Installed"
-            if flags and not all(flags):
+            if flags:
                 return "Disabled"
-        # A plugin name alone does not prove that an extension is enabled.
         return "Unverified"
-
-    relevant = [lines[index] for index in matches]
+    entries = [lines[i] for i in matches]
+    if any(re.search(r"\b(failed|error|not loaded)\b", line, re.I)
+           for line in entries):
+        return "Unverified"
     if any(re.search(r"\b(disabled|inactive|not enabled)\b", line, re.I)
-           for line in relevant):
+           for line in entries):
         return "Disabled"
     return "Installed"
 
 
 def probe_agent(agent: str) -> str:
-    """Return Installed/Disabled/Missing/Unverified; never mutate agent config."""
+    """Read-only bounded CLI check. Never equate a failed query with Missing."""
     if agent not in _COMMANDS or not shutil.which(agent):
-        return "Unverified"
+        return "Unavailable"
     try:
         result = subprocess.run(
             _COMMANDS[agent], check=False, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, timeout=2,
             stdin=subprocess.DEVNULL,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
         return "Unverified"
     if result.returncode != 0:
         return "Unverified"
-    return (_from_json(agent, result.stdout)
-            if agent in ("claude", "codex", "copilot")
-            else _from_text(result.stdout, gemini=agent == "gemini"))
-
-
-def probe_ponytail(receipt_dir: Path | None = None) -> dict[str, str]:
-    """Probe only installed targets recorded by Devbox, in parallel.
-
-    Bound the startup delay to approximately one subprocess timeout even
-    when the user has several coding agents configured.
-    """
-    base = RECEIPT_DIR if receipt_dir is None else receipt_dir
-    targets = [
-        agent for agent in AGENTS if (base / f"ponytail-{agent}").is_file()
-    ]
-    if not targets:
-        return {}
-    with ThreadPoolExecutor(max_workers=len(targets)) as pool:
-        return dict(zip(targets, pool.map(probe_agent, targets)))
+    if agent in ("claude", "codex", "copilot"):
+        return _from_json(agent, result.stdout)
+    return _from_text(result.stdout, gemini=agent == "gemini")
 
 
 def summary(statuses: dict[str, str]) -> str:
-    if not statuses:
+    """Aggregate installed CLIs only; absent CLIs must not affect the verdict."""
+    values = [v for v in statuses.values() if v != "Unavailable"]
+    if not values:
         return "Missing"
-    values = list(statuses.values())
+    if "Checking" in values:
+        return "Checking"
     if all(v == "Installed" for v in values):
         return "Installed"
-    if all(v == "Missing" for v in values):
-        return "Missing"
     if any(v == "Installed" for v in values):
         return "Partial"
-    if any(v == "Unverified" for v in values):
+    if "Unverified" in values:
         return "Unverified"
-    if any(v == "Disabled" for v in values):
+    if "Disabled" in values:
         return "Disabled"
-    return "Unverified"
+    return "Missing"

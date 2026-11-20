@@ -56,6 +56,8 @@ STATUS_STYLES = {
     "Missing": "class:missing",
     "Unverified": "class:warning",
     "Partial": "class:warning",
+    "Checking": "class:running",
+    "Unavailable": "class:muted",
     "Disabled": "class:warning",
     "RUNNING": "class:running",
     "QUEUED": "class:muted",
@@ -104,6 +106,7 @@ class KeyboardList:
         on_dry: Callable[[], None] | None = None,
         on_details: Callable[[], None] | None = None,
         on_theme: Callable[[], None] | None = None,
+        on_refresh: Callable[[], None] | None = None,
     ) -> None:
         self.entries = list(entries)
         self.multiple = multiple
@@ -167,6 +170,11 @@ class KeyboardList:
             @kb.add("i")
             def _details(_event) -> None:
                 on_details()
+
+        if on_refresh:
+            @kb.add("r")
+            def _refresh(_event) -> None:
+                on_refresh()
 
         if multiple and bulk_select:
             @kb.add("a")

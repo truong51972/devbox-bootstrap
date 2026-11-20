@@ -183,15 +183,21 @@ the upstream repository and plugin permissions before installing.
 
 **Activation and maintenance:** Restart the targeted agents afterward. In
 Codex, open `/hooks`, review and trust Ponytail's lifecycle hooks yourself.
-Devbox stores a Ponytail install receipt under
-`~/.local/state/devbox-bootstrap/agent-extensions/`; the TUI performs a bounded, read-only plugin inventory check for each
-recorded agent. Ponytail shows `Installed` only when all recorded agents report
-the plugin as enabled; `Partial` indicates a mix of enabled and other states,
-and `Disabled`, `Missing`, or `Unverified` describe the remaining cases.
-The details panel lists each agent's status. If the agent CLI cannot be queried
-or times out, Devbox keeps `Unverified` instead of guessing. Reopen Install
-components to refresh the inventory. The Doctor continues to report only
-installation receipts; it is not a live integration check. `--doctor` is read-only and cannot validate all
+Devbox stores an install receipt under
+`~/.local/state/devbox-bootstrap/agent-extensions/`, but the TUI **does not**
+require that receipt to inspect a plugin. It discovers all supported coding-agent
+CLIs available on `PATH`, including those installed or configured outside
+Devbox, and shows each agent's Ponytail status. An absent agent CLI is marked
+`Unavailable`; an available agent without Ponytail is `Missing`. A CLI that
+does not support the query or times out reports `Unverified`, not `Missing`.
+`Installed` means all detected agents report Ponytail enabled; `Partial`
+means some but not all. The aggregate can also be `Checking` while results are
+arriving. These checks run **asynchronously** only when the Components screen
+opens, with a short cache (60 seconds); the TUI does not wait on a CLI to start.
+Press `r` in Components to refresh the plugin inventory manually. The details
+panel lists every supported agent with its individual status. The Doctor
+continues to report only installation receipts; it is not a live integration
+check. `--doctor` is read-only and cannot validate all
 third-party plugin states. `--upgrade` only updates Devbox-owned RTK and
 Skills CLI installations **with ownership receipts**; any pre-existing
 user-local binaries are preserved and remain externally managed. Ponytail
