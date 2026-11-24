@@ -17,7 +17,8 @@ AGENTS = ("claude", "codex", "copilot", "opencode", "gemini")
 
 def build_command(action: str, selected: list[str], *, dry_run: bool = False,
                   agents: list[str] | None = None, allow_risky: bool = False,
-                  resources: list[str] | None = None, docker_endpoint: str = "") -> list[str]:
+                  resources: list[str] | None = None, docker_endpoint: str = "",
+                  update_revision: str = "") -> list[str]:
     if action == "clean":
         if not selected or len(set(selected)) != len(selected) or any(k not in BY_KEY for k in selected):
             raise ValueError("Select valid cleanup items.")
@@ -38,7 +39,10 @@ def build_command(action: str, selected: list[str], *, dry_run: bool = False,
                 cmd.append("--allow-risky")
         return cmd
     if action == "update":
-        return ["bash", str(ROOT / "bin/devbox"), "--update"]
+        command = ["bash", str(ROOT / "bin/devbox"), "--update"]
+        if update_revision:
+            command.append(update_revision)
+        return command
     if action in {"doctor", "preflight"}:
         return ["bash", str(ROOT / "setup-ubuntu.sh"), f"--{action}"]
     if action not in {"install", "upgrade"}:

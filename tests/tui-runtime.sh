@@ -6,17 +6,18 @@ tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 export HOME="$tmp/home"
 root="$HOME/.local/share/devbox-bootstrap"
-mkdir -p "$root/bin" "$root/tui" "$tmp/minimal" "$tmp/with-uv" "$tmp/with-python"
+mkdir -p "$root/bin" "$root/tui" "$root/utils" "$tmp/minimal" "$tmp/with-uv" "$tmp/with-python"
 cp "$repo_dir/bin/devbox" "$root/bin/devbox"
+cp "$repo_dir/utils/operation-lock.sh" "$root/utils/"
 cp "$repo_dir/tui/requirements.txt" "$root/tui/requirements.txt"
 export MOCK_RUNTIME_LOG="$tmp/runtime.log"
 
 # Restrict PATH so a CI host's installed uv/python3 cannot affect the tests.
-for command_name in readlink dirname mkdir chmod; do
+for command_name in readlink dirname mkdir chmod sha256sum cat rm mv mktemp flock touch timeout; do
     ln -s "$(command -v "$command_name")" "$tmp/minimal/$command_name"
 done
 ln -s /bin/bash "$tmp/minimal/bash"
-for command_name in readlink dirname mkdir chmod; do
+for command_name in readlink dirname mkdir chmod sha256sum cat rm mv mktemp flock touch timeout; do
     ln -s "$tmp/minimal/$command_name" "$tmp/with-uv/$command_name"
     ln -s "$tmp/minimal/$command_name" "$tmp/with-python/$command_name"
 done
@@ -46,6 +47,13 @@ out="$(PATH="$tmp/with-uv" /bin/bash "$root/bin/devbox" --setup-runtime)"
 [[ "$out" == *'Using uv'* ]]
 grep -Fq 'uv:venv ' "$MOCK_RUNTIME_LOG"
 grep -Fq 'uv:pip install --python ' "$MOCK_RUNTIME_LOG"
+[[ -s "$root/.venv/.devbox-runtime" ]]
+: > "$MOCK_RUNTIME_LOG"
+PATH="$tmp/with-uv" /bin/bash "$root/bin/devbox" --setup-runtime
+! grep -q "uv:pip install" "$MOCK_RUNTIME_LOG"
+printf "\n# changed requirements\n" >> "$root/tui/requirements.txt"
+PATH="$tmp/with-uv" /bin/bash "$root/bin/devbox" --setup-runtime
+grep -Fq "uv:pip install" "$MOCK_RUNTIME_LOG"
 if grep -Fq 'python3 must not' "$MOCK_RUNTIME_LOG"; then
     echo 'uv path incorrectly ran python3' >&2
     exit 1

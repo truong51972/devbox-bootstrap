@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Optional APT cleanup of unused packages and package caches.
-# Docs: https://ubuntu.com/server/docs/package-management
-sudo apt-get autoremove -y
-sudo apt-get autoclean -y
+# Explicit legacy compatibility alias; never remove installed packages.
+warn "Legacy clean component: use devbox --clean --only apt-cache --yes."
+sudo apt-get clean

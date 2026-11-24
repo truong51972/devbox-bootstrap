@@ -156,7 +156,12 @@ fi
 
 # shellcheck source=utils/utils.sh
 source "$SCRIPT_DIR/utils/utils.sh"
+# shellcheck source=utils/operation-lock.sh
+source "$SCRIPT_DIR/utils/operation-lock.sh"
 cd "$SCRIPT_DIR"
+if (( ! BOOTSTRAP_DRY_RUN && ! PREFLIGHT_ONLY && ! DOCTOR_ONLY )); then
+    devbox_acquire_lock || exit 1
+fi
 if (( DOCTOR_ONLY )); then
     # shellcheck source=utils/doctor.sh
     source "$SCRIPT_DIR/utils/doctor.sh"
@@ -378,7 +383,10 @@ run_component direnv 'Install direnv?' direnv.sh
 run_component rtk 'Install RTK (token optimizer)?' rtk.sh
 run_component skills-cli 'Install Skills CLI (Node.js required)?' skills-cli.sh
 run_component ponytail 'Install Ponytail for selected agents?' ponytail.sh
-run_component clean 'Run apt autoremove/autoclean?' clean.sh
+# Explicit legacy cache-only alias, not part of interactive provisioning.
+if [[ -n "$ONLY_COMPONENTS" ]]; then
+    run_component clean 'Clean APT download cache?' clean.sh
+fi
 
 if (( BOOTSTRAP_DRY_RUN )); then
     log 'Dry-run complete: no packages or shell configuration were changed.'

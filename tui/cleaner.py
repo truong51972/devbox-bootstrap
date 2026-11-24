@@ -19,6 +19,8 @@ import subprocess
 import sys
 import time
 
+from tui.operation_lock import operation_lock
+
 
 @dataclass(frozen=True)
 class Cleaner:
@@ -550,6 +552,17 @@ def main(argv=None):
                 event(key, "PLANNED")
             print("Preview only; eligibility is checked at execution.")
             return 0
+    try:
+        if args.yes:
+            with operation_lock():
+                return run_plan(args, parser, keys if args.only else [])
+        return run_plan(args, parser, keys if args.only else [])
+    except (OSError, RuntimeError) as exc:
+        print(f"Cleanup unavailable: {exc}", file=sys.stderr)
+        return 1
+
+
+def run_plan(args, parser, keys):
     target = None
     requested = (keys if args.only else SAFE_KEYS if args.all_safe else ORDER)
     if any(BY_KEY[key].tool == "docker" for key in requested) and shutil.which("docker"):

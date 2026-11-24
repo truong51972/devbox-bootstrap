@@ -59,8 +59,9 @@ async def _check(root: Path) -> UpdateCheck:
     current = await read("rev-parse", "HEAD")
     # Fetch objects only, never merge or modify source. Use the fetched ref
     # for ancestry validation; ahead/diverged checkouts must not be offered.
-    await read("fetch", "--no-tags", "--no-recurse-submodules", "origin", "main")
-    latest = await read("rev-parse", "FETCH_HEAD")
+    await read("fetch", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
+               "origin", "+refs/heads/main:refs/devbox/update-check")
+    latest = await read("rev-parse", "refs/devbox/update-check")
     if current == latest:
         return UpdateCheck("current", current, latest)
     code, _ = await git(root, "merge-base", "--is-ancestor", current, latest)

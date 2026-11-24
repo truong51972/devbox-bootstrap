@@ -41,7 +41,7 @@ another view, the prompt waits until you return to the main menu.
 Both startup Yes and **Update Devbox source** exit the TUI only after source
 and runtime update succeed. The terminal shows the outcome and log path;
 run devbox again to load the new revision. Failures remain in the Result view.
-Set DEVBOX_CHECK_UPDATES=0 to disable the startup check. CLI --update is unchanged.
+Set DEVBOX_CHECK_UPDATES=0 to disable the startup check. Startup confirmation pins the offered revision; if upstream changes, reopen Devbox and review again. The runtime dependency fingerprint is checked on launch and repaired if stale. If source updates but runtime setup fails, run `devbox --setup-runtime` to recover (no destructive Git reset). Mutating Devbox operations share a nonblocking per-user lock across CLI and TUI; read-only discovery remains available. The lock does not coordinate unrelated external Docker/APT commands.
 
 The keyboard-first TUI starts at a **minimal grouped menu**. Install/Upgrade
 opens a sectioned component list with a contextual details panel, then a
@@ -142,7 +142,7 @@ Requires Ubuntu, Bash, an interactive terminal, network access, and `sudo` privi
 
 - Base packages (interactive full setup only): compiler/build tools, Git, curl, wget, CA certificates, and GnuPG. No automatic full-system `apt upgrade`.
 - Optional: Zsh + Oh My Zsh, syntax highlighting, autosuggestions, Powerlevel10k; uv; SSH keychain; zoxide; **fzf, ripgrep, bat + fd, direnv**; Docker Engine; NVIDIA Container Toolkit; kubectl; and Minikube.
-- Optional at the end: apt cleanup and reboot.
+- Optional at the end: reboot. Use Cleaner for APT download cache cleanup. The legacy explicit `--only clean` alias only runs `apt-get clean`, never autoremove.
 
 Each optional component is prompted separately and defaults to **No**. Powerlevel10k is offered only when Zsh is available; NVIDIA Toolkit only when Docker is available. Minikube is a separate optional installer. Configuration is written to the selected shell (`~/.zshrc` or `~/.bashrc`). The installer preserves an existing `~/.p10k.zsh` instead of overwriting it, and avoids repeating marked configuration blocks.
 

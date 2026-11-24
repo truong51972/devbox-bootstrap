@@ -157,6 +157,7 @@ class DevboxTUI:
         self.message = "Ready. Choose an action."
         self.update_check_task: asyncio.Task[None] | None = None
         self.pending_update: UpdateCheck | None = None
+        self.update_revision = ""
         self.exit_message = ""
         self.process: asyncio.subprocess.Process | None = None
         self.log_path: Path | None = None
@@ -319,6 +320,7 @@ class DevboxTUI:
         if not yes:
             self._decline_update()
             return
+        self.update_revision = self.pending_update.latest
         self.pending_update = None
         self.action = "update"
         self.dry_run = False
@@ -1215,6 +1217,7 @@ class DevboxTUI:
         elif action == "logs":
             self.list_history()
         elif action == "update":
+            self.update_revision = ""
             self.action = action
             self.dry_run = False
             self.selected = []
@@ -1354,7 +1357,8 @@ class DevboxTUI:
                                     agents=self._chosen_agents() if action == "install" else [],
                                     allow_risky=action == "clean" and "risk" in self.options.current_values,
                                     resources=[key for key in self.options.current_values if key.startswith(("image:", "volume:"))] if action == "clean" else [],
-                                    docker_endpoint=next(iter(endpoints), ""))
+                                    docker_endpoint=next(iter(endpoints), ""),
+                                    update_revision=self.update_revision if action == "update" else "")
         except ValueError as exc:
             self._notice(str(exc))
             return
