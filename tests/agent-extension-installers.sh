@@ -21,6 +21,10 @@ cat > "$scratch/bin/codex" <<'EOF'
 #!/usr/bin/env bash
 printf 'codex %s\n' "$*" >> "$DEVBOX_LOG"
 EOF
+cat > "$scratch/bin/agy" <<'EOF'
+#!/usr/bin/env bash
+printf 'agy %s\n' "$*" >> "$DEVBOX_LOG"
+EOF
 cat > "$scratch/bin/node" <<'EOF'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "-p" ]]; then printf '22.20.0\n'; fi
@@ -33,13 +37,15 @@ EOF
 chmod +x "$scratch/bin/"*
 
 # Ponytail should run two supported upstream commands and use --yes for headless Claude.
-DEVBOX_AGENT_TARGETS_ARRAY=(claude codex)
+DEVBOX_AGENT_TARGETS_ARRAY=(claude codex agy)
 source installers/ponytail.sh
 grep -Fqx 'claude plugin marketplace add DietrichGebert/ponytail' "$DEVBOX_LOG"
 grep -Fqx 'claude plugin install ponytail@ponytail --yes' "$DEVBOX_LOG"
 grep -Fqx 'codex plugin marketplace add DietrichGebert/ponytail' "$DEVBOX_LOG"
 grep -Fqx 'codex plugin add ponytail@ponytail' "$DEVBOX_LOG"
 [[ -s "$HOME/.local/state/devbox-bootstrap/agent-extensions/ponytail-claude" ]]
+grep -Fqx 'agy plugin install https://github.com/DietrichGebert/ponytail' "$DEVBOX_LOG"
+[[ -s "$HOME/.local/state/devbox-bootstrap/agent-extensions/ponytail-agy" ]]
 
 # Missing agent must fail before registering any plugin.
 : > "$DEVBOX_LOG"
@@ -60,9 +66,10 @@ esac
 EOF
 chmod +x "$HOME/.local/bin/rtk"
 : > "$DEVBOX_LOG"
-DEVBOX_AGENT_TARGETS_ARRAY=(codex)
+DEVBOX_AGENT_TARGETS_ARRAY=(codex agy)
 source installers/rtk.sh
 grep -Fqx 'rtk init -g --codex' "$DEVBOX_LOG"
+grep -Fqx 'rtk init -g --agent antigravity' "$DEVBOX_LOG"
 [[ ! -f "$HOME/.local/state/devbox-bootstrap/managed/rtk.sha256" ]]
 
 # Skills CLI must not overwrite a user-local CLI without a receipt.
