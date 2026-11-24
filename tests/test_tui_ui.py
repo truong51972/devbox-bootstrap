@@ -19,7 +19,8 @@ from tui.app import DevboxTUI
 from tui.views import detail_panel_width, SPLIT_SPACING
 from prompt_toolkit.layout.dimension import to_dimension
 from tui.catalog import ORDER
-from tui.ui import Entry, KeyboardList
+from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
+from prompt_toolkit.styles import Style
 
 
 class LayoutTests(unittest.TestCase):
@@ -153,6 +154,26 @@ class LayoutTests(unittest.TestCase):
         rendered = "".join(t for _, t in app.selector.render())
         self.assertEqual(rendered.count("  SHELL\n"), 1)
         self.assertEqual(rendered.count("  DEVELOPER TOOLS\n"), 1)
+
+    def test_missing_status_is_highlighted_even_when_focused(self):
+        noop = lambda: None
+        widget = KeyboardList(
+            [Entry("a", "First", status="Missing"), Entry("b", "Second", status="Missing")],
+            on_enter=noop, on_back=noop, on_help=noop, on_change=noop,
+        )
+        fragments = widget.render()
+        self.assertIn(("class:focus class:missing", "Missing\n"), fragments)
+        self.assertIn(("class:missing", "Missing\n"), fragments)
+        theme = Style.from_dict(THEMES["minimal"])
+        normal = theme.get_attrs_for_style_str("class:missing")
+        focused = theme.get_attrs_for_style_str("class:focus class:missing")
+        self.assertEqual(normal.color, "ansibrightred")
+        self.assertEqual(focused.color, normal.color)
+        self.assertEqual(focused.bgcolor, "ansiblue")
+        self.assertTrue(normal.bold)
+        self.assertEqual(STATUS_STYLES["Unavailable"], "class:muted")
+        mono = Style.from_dict(THEMES["mono"])
+        self.assertTrue(mono.get_attrs_for_style_str("class:missing").underline)
 
     def test_status_aligns_to_list_pane_not_terminal(self):
         app = DevboxTUI()
