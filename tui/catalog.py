@@ -7,6 +7,7 @@ import shutil
 import subprocess
 
 from tui.agent_status import discover_agents, summary as ponytail_summary
+from tui.rtk_status import binary_status, inspect_rtk
 
 COMPONENTS = (
     ("zsh", "Zsh + Oh My Zsh"),
@@ -60,12 +61,7 @@ def installed(code: str) -> bool:
     if code == "powerlevel10k":
         return (Path.home() / "powerlevel10k/powerlevel10k.zsh-theme").is_file()
     if code == "rtk":
-        executable_path = shutil.which("rtk") or str(Path.home() / ".local/bin/rtk")
-        try:
-            return subprocess.run([executable_path, "gain"], stdout=subprocess.DEVNULL,
-                                  stderr=subprocess.DEVNULL, timeout=2).returncode == 0
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
-            return False
+        return binary_status().state == "Installed"
     if code == "bat-fd":
         return (executable("bat") or executable("batcat")) and (
             executable("fd") or executable("fdfind")
@@ -81,6 +77,8 @@ def inventory(ponytail_agents: dict[str, str] | None = None,
         if quick and code == "rtk":
             # Avoid launching rtk gain on the UI thread; verify asynchronously.
             result[code] = "Unverified" if executable("rtk") else "Missing"
+        elif code == "rtk":
+            result[code] = inspect_rtk(ponytail_agents).state
         elif code == "bat-fd":
             bat = executable("bat") or executable("batcat")
             fd = executable("fd") or executable("fdfind")
