@@ -56,7 +56,7 @@ def build_command(action: str, selected: list[str], *, dry_run: bool = False,
     if action == "install" and "ponytail" in selected and not targets:
         raise ValueError("Select at least one agent target for Ponytail.")
     allowed = {code for code, _ in COMPONENTS}
-    if not selected or any(item not in allowed for item in selected):
+    if not selected or len(set(selected)) != len(selected) or any(item not in allowed for item in selected):
         raise ValueError("Select at least one valid component.")
     cmd = ["bash", str(ROOT / "setup-ubuntu.sh")]
     if action == "upgrade":
@@ -70,7 +70,7 @@ def build_command(action: str, selected: list[str], *, dry_run: bool = False,
 
 
 def log_tail(path: Path | None, count: int = 14, *, max_bytes: int = 65536) -> str:
-    if path is None or not path.is_file():
+    if path is None or not path.is_file() or path.is_symlink():
         return "No output yet."
     with path.open("rb") as stream:
         stream.seek(0, os.SEEK_END)

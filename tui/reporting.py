@@ -71,7 +71,10 @@ def read_report(log_path: Path):
         if payload.pop("schema", None) != 1:
             return None
         report = RunReport(**payload)
-        if not isinstance(report.duration, (int, float)) or not isinstance(report.status, dict) or not isinstance(report.details, dict):
+        if (not isinstance(report.duration, (int, float)) or not isinstance(report.status, dict)
+                or not isinstance(report.details, dict)
+                or not all(isinstance(k, str) and isinstance(v, str) for k, v in report.status.items())
+                or not all(isinstance(k, str) and isinstance(v, str) for k, v in report.details.items())):
             return None
         return report
     except (OSError, ValueError, TypeError, AttributeError):

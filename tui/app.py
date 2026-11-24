@@ -13,15 +13,13 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import tempfile
 import time
 
 from prompt_toolkit import Application
 from prompt_toolkit.application import in_terminal
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import HSplit, VSplit, DynamicContainer, Layout, Window
-from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout import DynamicContainer, Layout
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import TextArea
@@ -37,6 +35,8 @@ from tui.update_check import UpdateCheck, check_update
 from tui.views import DevboxViews, DETAIL_PANEL_WIDTH
 from tui.tasks import BackgroundTasks
 from tui.reporting import RunReport, read_report, write_report, summarize_status, status_lines
+from tui.execution import prepare_run, run_env, launch, wait_for_run
+from tui.inventory_detail import inspect_components
 from tui.cleaner import (BY_KEY as CLEANER_ITEMS, SAFE_KEYS, PROBE_GROUPS,
                          PROBE_CONCURRENCY, Scan, probe_group)
 
@@ -142,7 +142,9 @@ class DevboxTUI(DevboxViews):
     def __init__(self) -> None:
         self.tasks = BackgroundTasks()
         self.run_report: RunReport | None = None
+        self.run_started = None
         self.outcome_details: dict[str, str] = {}
+        self.component_metadata = {}
         self.screen = "home"
         self.previous_screen = "home"
         self.help_return_screen = "home"
@@ -177,7 +179,6 @@ class DevboxTUI(DevboxViews):
         if self.theme not in THEMES:
             self.theme = "minimal"
         self.expanded_log = False
-        self._search_text = ""
 
         self.menu = self._make_menu()
         self.update_choices = KeyboardList(
@@ -196,6 +197,7 @@ class DevboxTUI(DevboxViews):
         self.options = self._make_options([])
         self.confirm_plan = TextArea(text="", read_only=True, focusable=True,
                                      scrollbar=True, wrap_lines=True)
+        self.history_reports = {}
         self.log_files = self._make_log_list([])
         self.status_view = TextArea(
             text="", read_only=True, focusable=True, scrollbar=True,
@@ -209,7 +211,7 @@ class DevboxTUI(DevboxViews):
         self.log_view.window.height = Dimension(weight=2, min=5)
         self.results_view = TextArea(
             text="", read_only=True, focusable=True, scrollbar=True,
-            wrap_lines=False,
+            wrap_lines=True,
         )
         self.history_view = TextArea(
             text="", read_only=True, focusable=True, scrollbar=True,
@@ -376,6 +378,7 @@ class DevboxTUI(DevboxViews):
         """Discard in-flight state after an installer may change plugins."""
         self._agent_scan_generation += 1
         self._agent_scan_completed_at = 0.0
+        self.component_metadata = {}
         if self._agent_scan_task is not None and not self._agent_scan_task.done():
             self.tasks.cancel("agents")
         self._agent_scan_task = None
@@ -397,7 +400,7 @@ class DevboxTUI(DevboxViews):
             (Path.home() / ".local/bin/rtk").is_file() else "Missing",
         )
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             # Headless/unit tests may manipulate the TUI outside an event loop.
             return
@@ -431,6 +434,17 @@ class DevboxTUI(DevboxViews):
             if self.ponytail_agents.get(agent) == "Checking"
         ]
         tasks.append(check_rtk())
+
+        async def check_metadata():
+            try:
+                metadata = await asyncio.to_thread(inspect_components)
+            except Exception:
+                return
+            if generation == self._agent_scan_generation:
+                self.component_metadata = metadata
+                self._invalidate()
+
+        tasks.append(check_metadata())
         try:
             await asyncio.gather(*tasks)
         finally:
@@ -597,7 +611,7 @@ class DevboxTUI(DevboxViews):
             ("class:body", item.description + "\n\n"),
             ("class:running" if row is None else "class:body",
              "Checking availability and size..." if row is None else
-             (f"Estimate: {row.estimate}\n" if row.available else "Unavailable\n") + row.note),
+             (f"{'Engine category estimate' if item.key.startswith('docker-') else 'Cache estimate'}: {row.estimate}\n" if row.available else "Unavailable\n") + row.note),
         ]
 
     def _show_cleaner_info(self) -> None:
@@ -643,7 +657,7 @@ class DevboxTUI(DevboxViews):
                          f"{hour[:2]}:{hour[2:4]} UTC")
             else:
                 title = path.name
-            report = read_report(path)
+            report = self.history_reports.get(path)
             entries.append(Entry(str(path), title, status=report.heading if report else "",
                                  description=str(path)))
         return KeyboardList(
@@ -735,6 +749,10 @@ class DevboxTUI(DevboxViews):
         if unverified_count or other_count:
             out.append(("class:warning", f"  {unverified_count} unverified  ·  {other_count} other\n"))
         out.append(("class:muted", f"  {selected_count} / {len(self.selector.entries)} selected\n"))
+        metadata = self.component_metadata.get(item.key)
+        if metadata:
+            out.extend([("class:section", "\n  INSTALLATION\n"),
+                        ("class:body", "  " + metadata + "\n")])
         if item.key in WARNINGS:
             out.extend([
                 ("class:section", "\n  NOTE\n"),
@@ -758,15 +776,16 @@ class DevboxTUI(DevboxViews):
             code for code in active if self.status[code] == "RUNNING"
         ]
         current = running[0] if running else self.current_action
+        elapsed = f" · {time.monotonic() - self.run_started:.1f}s" if self.run_started is not None else ""
         if not active:
             return [
                 ("class:running", "  " + self.current_action.upper() + "\n"),
-                ("class:muted", "  Running system command..."),
+                ("class:muted", "  Running system command..." + elapsed),
             ]
         return [
             ("class:running", f"  {self.current_action.upper()} "),
             ("class:muted", f" {len(complete)} / {len(active)} complete\n"),
-            ("class:body", "  Current: " + current),
+            ("class:body", "  Current: " + current + elapsed),
         ]
 
     def _history_details(self):
@@ -779,7 +798,7 @@ class DevboxTUI(DevboxViews):
             size, mtime_ns = stat.st_size, stat.st_mtime_ns
         except OSError:
             size, mtime_ns = 0, 0
-        report = read_report(path)
+        report = self.history_reports.get(path)
         summary = (f"  {report.heading} | {report.duration:.1f}s\n  {summarize_status(report.status)}\n" if report else "  Legacy log (no structured report)\n")
         return [
             ("class:section", "  SELECTED RUN\n\n"),
@@ -1131,6 +1150,7 @@ class DevboxTUI(DevboxViews):
 
         # Stop read-only workers before executing any mutating job.
         self._cancel_cleaner_scan()
+        self._invalidate_agent_scan()
         if action == "update":
             self._cancel_update_check()
         # Reserve the slot before creating a task: rapid Enter cannot overlap APT.
@@ -1181,6 +1201,7 @@ class DevboxTUI(DevboxViews):
         keepalive: asyncio.Task[None] | None = None
         code: int | None = None
         started = time.monotonic()
+        self.run_started = started
         timestamp = datetime.now(timezone.utc).isoformat()
         try:
             # User-scoped AI extensions never need the preflight sudo prompt.
@@ -1194,39 +1215,13 @@ class DevboxTUI(DevboxViews):
                     return
                 keepalive = asyncio.create_task(self._sudo_keepalive())
 
-            log_dir = STATE_ROOT / "logs"
-            event_dir = STATE_ROOT / "runs"
-            log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-            event_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-            fd, name = tempfile.mkstemp(prefix=f"{stamp}-{action}-", suffix=".log", dir=log_dir)
-            self.log_path = Path(name)
-            event_fd, event_name = tempfile.mkstemp(
-                prefix=f"{stamp}-{action}-", suffix=".events", dir=event_dir
-            )
-            os.close(event_fd)
-            self.event_path = Path(event_name)
-            env = os.environ.copy()
-            env["DEVBOX_EVENT_FILE"] = str(self.event_path)
-            env["DEVBOX_TUI_MODE"] = "1"
+            files = prepare_run(STATE_ROOT, action)
+            self.log_path, self.event_path = files.log, files.events
             enabled = set(self.options.current_values) if action == "install" else set()
-            for key, option in (
-                ("DEVBOX_CONFIRM_CHANGE_SHELL", "change_shell"),
-                ("DEVBOX_CONFIRM_DOCKER_GROUP", "docker_group"),
-                ("DEVBOX_CONFIRM_SSH_KEY", "ssh_key"),
-                ("DEVBOX_CONFIRM_KUBECTL_REPLACE", "kubectl_replace"),
-            ):
-                env[key] = "yes" if option in enabled else "no"
-            with os.fdopen(fd, "wb", buffering=0) as output:
-                self.process = await asyncio.create_subprocess_exec(
-                    *command, cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
-                    stdout=output, stderr=subprocess.STDOUT,
-                )
+            with os.fdopen(files.fd, "wb", buffering=0) as output:
+                self.process = await launch(command, root=ROOT, env=run_env(files.events, enabled), output=output)
                 self._notice(f"{action.title()} running. Log: {self.log_path}")
-                while self.process.returncode is None:
-                    await asyncio.sleep(0.3)
-                    self._refresh()
-                code = await self.process.wait()
+                code = await wait_for_run(self.process, self._refresh)
             self._refresh()
             self.last_result = (("Preview complete — no changes made." if self.dry_run and action in ("install", "upgrade", "clean")
                                  else "Completed successfully.") if code == 0
@@ -1309,6 +1304,7 @@ class DevboxTUI(DevboxViews):
     def list_history(self) -> None:
         log_dir = STATE_ROOT / "logs"
         paths = sorted(log_dir.glob("*.log"), reverse=True)[:100] if log_dir.exists() else []
+        self.history_reports = {path: read_report(path) for path in paths}
         self.log_files = self._make_log_list(paths)
         self._layout_cache.pop("logs-wide", None)
         self.filter_active = False
