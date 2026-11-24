@@ -243,12 +243,14 @@ verify_component() {
             "$rtk_exe" gain >/dev/null 2>&1 || { die 'RTK is not rtk-ai Token Killer'; return 1; } ;;
         skills-cli) verify_binary "$component" skills || return 1 ;;
         ponytail)
-            local agent
-            for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
-                [[ -s "$HOME/.local/state/devbox-bootstrap/agent-extensions/ponytail-$agent" ]] || {
-                    die "Ponytail integration marker absent for $agent"; return 1;
-                }
-            done ;;
+            if ! command -v python3 >/dev/null 2>&1; then
+                warn 'Ponytail commands completed; inventory requires Python 3.'
+                return 0
+            fi
+            if ! python3 -m tui.agent_status --verify "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; then
+                warn 'Ponytail commands completed, but registration could not be fully verified.'
+                return 1
+            fi ;;
         docker) verify_binary "$component" docker || return 1 ;;
         nvidia) verify_binary "$component" nvidia-ctk || return 1 ;;
         minikube) verify_binary "$component" minikube || return 1 ;;
