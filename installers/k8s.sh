@@ -13,6 +13,9 @@ if command -v kubectl >/dev/null 2>&1; then
         if [[ "$existing_version" == *"\"$requested_version\"" ]]; then
             install_kubectl=false
             log "kubectl $requested_version is already installed."
+        elif [[ "$(command -v kubectl)" != /usr/local/bin/kubectl ]] || ! managed_binary_matches kubectl /usr/local/bin/kubectl; then
+            die "Existing kubectl is externally managed or has no matching receipt; refusing replacement."
+            return 1
         elif ! confirm "kubectl exists with a different version; replace it with $requested_version?" kubectl_replace; then
             die 'kubectl version selection cancelled; existing binary was preserved.'
             return 1
@@ -21,6 +24,10 @@ if command -v kubectl >/dev/null 2>&1; then
 fi
 
 if [[ "$install_kubectl" == true ]]; then
+    if [[ -e /usr/local/bin/kubectl || -L /usr/local/bin/kubectl ]] && ! managed_binary_matches kubectl /usr/local/bin/kubectl; then
+        die "Refusing to overwrite an unowned kubectl binary."
+        return 1
+    fi
     sudo apt-get install -y curl ca-certificates
     architecture="$(dpkg --print-architecture)"
     case "$architecture" in
@@ -36,6 +43,7 @@ if [[ "$install_kubectl" == true ]]; then
       curl -fsSL "${download_url}.sha256" -o "$temp_dir/kubectl.sha256"
       printf '%s  %s\n' "$(cat "$temp_dir/kubectl.sha256")" "$temp_dir/kubectl" | sha256sum --check --status
       sudo install -o root -g root -m 0755 "$temp_dir/kubectl" /usr/local/bin/kubectl
+      record_managed_binary kubectl "$temp_dir/kubectl"
     )
 fi
 

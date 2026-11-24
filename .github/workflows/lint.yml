@@ -37,3 +37,4 @@ jobs:
           "$RUNNER_TEMP/devbox-tui-venv/bin/python" -m compileall -q tui
           "$RUNNER_TEMP/devbox-tui-venv/bin/python" -m unittest discover -s tests -p 'test_tui*.py' -v
           "$RUNNER_TEMP/devbox-tui-venv/bin/python" -m unittest discover -s tests -p 'test_cleaner*.py' -v
+          "$RUNNER_TEMP/devbox-tui-venv/bin/python" -m unittest discover -s tests -p 'test_operation_lock.py' -v

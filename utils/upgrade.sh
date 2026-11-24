@@ -75,7 +75,7 @@ upgrade_git() {
     [[ -d "$dir/.git" ]] || return 0
     UPGRADE_FOUND=1
     origin="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"
-    if [[ "$origin" != *"$expected"* ]]; then
+    if ! trusted_github_origin "$origin" "$expected"; then
         warn "Skipping $dir: unexpected git origin ($origin)."
         UPGRADE_BLOCKED=1
         return 0
@@ -105,7 +105,7 @@ upgrade_zsh_framework() {
         return 0
     fi
     origin="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"
-    if [[ "$origin" != *ohmyzsh/ohmyzsh* || -n "$(git -C "$dir" status --porcelain --untracked-files=no)" ]]; then
+    if ! trusted_github_origin "$origin" ohmyzsh/ohmyzsh || [[ -n "$(git -C "$dir" status --porcelain --untracked-files=no)" ]]; then
         warn 'Skipping Oh My Zsh: custom repository or local modifications.'
         UPGRADE_BLOCKED=1
         return 0
@@ -158,6 +158,11 @@ upgrade_binary() {
         return 0
     fi
     UPGRADE_FOUND=1
+    if ! managed_binary_matches "$name" "/usr/local/bin/$name"; then
+        warn "$name has no matching Devbox ownership receipt; preserve external/legacy binary."
+        UPGRADE_BLOCKED=1
+        return 0
+    fi
     if [[ ! "$current_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         warn "Cannot parse installed $name version; skipping automatic replacement."
         UPGRADE_BLOCKED=1
@@ -183,7 +188,9 @@ upgrade_binary() {
         upgrade_fetch --max-time 300 "$url" -o "$dir/$name"
         upgrade_fetch --max-time 30 "${url}.sha256" -o "$dir/$name.sha256"
         printf '%s  %s\n' "$(cat "$dir/$name.sha256")" "$dir/$name" | sha256sum --check --status
+        managed_binary_matches "$name" "/usr/local/bin/$name" || { die "Binary changed during download"; return 1; }
         sudo install -o root -g root -m 0755 "$dir/$name" "/usr/local/bin/$name"
+        record_managed_binary "$name" "$dir/$name"
     )
     UPGRADE_CHANGED=1
 }
@@ -200,6 +207,11 @@ upgrade_kubectl() {
     fi
     [[ -x /usr/local/bin/kubectl ]] || return 0
     UPGRADE_FOUND=1
+    if ! managed_binary_matches kubectl /usr/local/bin/kubectl; then
+        warn 'kubectl has no matching Devbox ownership receipt; preserving it.'
+        UPGRADE_BLOCKED=1
+        return 0
+    fi
     if (( BOOTSTRAP_DRY_RUN )); then
         log '[dry-run] Would check Kubernetes stable/pinned version; no downloads in dry-run'
         return 0
@@ -221,6 +233,11 @@ upgrade_minikube() {
     fi
     [[ -x /usr/local/bin/minikube ]] || return 0
     UPGRADE_FOUND=1
+    if ! managed_binary_matches minikube /usr/local/bin/minikube; then
+        warn 'minikube has no matching Devbox ownership receipt; preserving it.'
+        UPGRADE_BLOCKED=1
+        return 0
+    fi
     if (( BOOTSTRAP_DRY_RUN )); then
         log '[dry-run] Would check latest Minikube GitHub release; no downloads in dry-run'
         return 0
@@ -369,7 +386,9 @@ upgrade_component() {
             ;;
         *) die "Unsupported upgrade component: $component"; return 1 ;;
     esac
-    if (( BOOTSTRAP_DRY_RUN && UPGRADE_FOUND )); then
+    if (( BOOTSTRAP_DRY_RUN && UPGRADE_BLOCKED )); then
+        UPGRADE_STATUS["$component"]=SKIPPED
+    elif (( BOOTSTRAP_DRY_RUN && UPGRADE_FOUND )); then
         UPGRADE_STATUS["$component"]=PLANNED
     elif (( UPGRADE_CHANGED )); then
         UPGRADE_STATUS["$component"]=UPDATED

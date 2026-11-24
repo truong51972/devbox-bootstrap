@@ -3,7 +3,8 @@ set -Eeuo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 temp_dir="$(mktemp -d)"
 trap 'rm -rf -- "$temp_dir"' EXIT
-mkdir -p "$temp_dir/bin"
+export HOME="$temp_dir/home"
+mkdir -p "$temp_dir/bin" "$HOME"
 
 cat > "$temp_dir/bin/sudo" <<'MOCK'
 #!/usr/bin/env bash
@@ -69,4 +70,6 @@ if output="$(bash "$repo_dir/setup-ubuntu.sh" --only clean 2>&1)"; then
     exit 1
 fi
 [[ "$output" == *'FAILED'* && "$output" == *'clean'* ]]
+grep -Fxq 'apt-get clean' "$MOCK_LOG"
+! grep -q 'autoremove' "$MOCK_LOG"
 printf 'Hardening tests passed.\n'

@@ -4,6 +4,10 @@
 if command -v minikube >/dev/null 2>&1; then
     log 'Minikube already installed; skipping.'
 else
+    if [[ -e /usr/local/bin/minikube || -L /usr/local/bin/minikube ]]; then
+        die "Refusing to overwrite an existing Minikube binary outside PATH."
+        return 1
+    fi
     sudo apt-get install -y curl ca-certificates
     architecture="$(dpkg --print-architecture)"
     case "$architecture" in
@@ -19,6 +23,7 @@ else
         curl -fsSL "${url}.sha256" -o "$temp_dir/minikube.sha256"
         printf '%s  %s\n' "$(cat "$temp_dir/minikube.sha256")" "$temp_dir/minikube" | sha256sum --check --status
         sudo install -o root -g root -m 0755 "$temp_dir/minikube" /usr/local/bin/minikube
+        record_managed_binary minikube "$temp_dir/minikube"
     )
 fi
 
