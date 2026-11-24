@@ -98,7 +98,8 @@ class PonytailStatusTests(unittest.TestCase):
 
     def test_diagnostics_and_retry(self):
         import subprocess
-        with patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
+        with patch("tui.agent_status._codex_local_status", return_value=None), \
+             patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
              patch("tui.agent_status.subprocess.run", side_effect=[
                  subprocess.TimeoutExpired("codex", 6),
                  SimpleNamespace(returncode=0, stdout='{"installed":[{"id":"ponytail@ponytail"}]}'),
@@ -106,13 +107,70 @@ class PonytailStatusTests(unittest.TestCase):
             result = agent_status.probe_agent_detail("codex")
             self.assertEqual(result.state, "Installed")
             self.assertEqual(run.call_count, 2)
-        with patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
+        with patch("tui.agent_status._codex_local_status", return_value=None), \
+             patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
              patch("tui.agent_status.subprocess.run", return_value=SimpleNamespace(
                  returncode=2, stdout="", stderr="unsupported --json"
              )):
             result = agent_status.probe_agent_detail("codex")
             self.assertEqual(result.state, "Unverified")
             self.assertIn("unsupported --json", result.reason)
+
+    def test_codex_local_registration_and_cache_without_cli(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        if agent_status.tomllib is None:
+            self.skipTest("TOML parser unavailable")
+        with tempfile.TemporaryDirectory() as temp, \
+             patch.dict(os.environ, {"CODEX_HOME": temp}), \
+             patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
+             patch("tui.agent_status.subprocess.run") as run:
+            home = Path(temp)
+            config = home / "config.toml"
+            manifest = home / "plugins/cache/ponytail/ponytail/1.0/.codex-plugin/plugin.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text('{"name":"ponytail","version":"1.0"}', encoding="utf-8")
+            # Orphaned cache and marketplace registration are not installation evidence.
+            config.write_text('[marketplaces.ponytail]\nsource="example"\n', encoding="utf-8")
+            self.assertIsNone(agent_status._codex_local_status())
+            config.write_text('[plugins."ponytail@ponytail"]\nenabled=true\n', encoding="utf-8")
+            result = agent_status.probe_agent_detail("codex")
+            self.assertEqual(result.state, "Installed")
+            self.assertEqual(result.scope, "user")
+            self.assertEqual(result.source, "local config + cache")
+            config.write_text('[plugins."ponytail@ponytail"]\nenabled=false\n', encoding="utf-8")
+            self.assertEqual(agent_status.probe_agent_detail("codex").state, "Disabled")
+            config.write_text('[plugins."ponytail@ponytail"]\nenabled=true\n', encoding="utf-8")
+            manifest.unlink()
+            self.assertIsNone(agent_status._codex_local_status())
+            run.assert_not_called()
+
+    def test_codex_timeout_scoped_negative_is_not_global_missing(self):
+        import subprocess
+        with patch("tui.agent_status._codex_local_status", return_value=None), \
+             patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
+             patch("tui.agent_status.subprocess.run", side_effect=[
+                 subprocess.TimeoutExpired("codex", 6),
+                 SimpleNamespace(returncode=0, stdout='{"installed":[]}'),
+             ]) as run:
+            result = agent_status.probe_agent_detail("codex")
+            self.assertEqual(result.state, "Unverified")
+            self.assertEqual(run.call_args_list[1].args[0][-2:], ("--marketplace", "ponytail"))
+
+    def test_copilot_missing_launcher_is_unavailable(self):
+        with patch("tui.agent_status.shutil.which", return_value="/bin/copilot"), \
+             patch("tui.agent_status.subprocess.run", return_value=SimpleNamespace(
+                 returncode=127, stdout="", stderr="GitHub Copilot CLI was not found. Run copilot in a terminal to install it."
+             )):
+            result = agent_status.probe_agent_detail("copilot")
+            self.assertEqual(result.state, "Unavailable")
+            self.assertEqual(agent_status.summary({"copilot": result.state, "codex": "Installed"}), "Installed")
+        with patch("tui.agent_status.shutil.which", return_value="/bin/copilot"), \
+             patch("tui.agent_status.subprocess.run", return_value=SimpleNamespace(
+                 returncode=127, stdout="", stderr="some other error"
+             )):
+            self.assertEqual(agent_status.probe_agent_detail("copilot").state, "Unverified")
 
     def test_legacy_opencode_config(self):
         import os
@@ -148,12 +206,14 @@ class PonytailStatusTests(unittest.TestCase):
     def test_failed_or_unsupported_queries_never_claim_missing(self):
         with patch("tui.agent_status.shutil.which", return_value=None):
             self.assertEqual(agent_status.probe_agent("codex"), "Unavailable")
-        with patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
+        with patch("tui.agent_status._codex_local_status", return_value=None), \
+             patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
              patch("tui.agent_status.subprocess.run", return_value=SimpleNamespace(
                  returncode=1, stdout=""
              )):
             self.assertEqual(agent_status.probe_agent("codex"), "Unverified")
-        with patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
+        with patch("tui.agent_status._codex_local_status", return_value=None), \
+             patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
              patch("tui.agent_status.subprocess.run",
                    side_effect=__import__("subprocess").TimeoutExpired("codex", 2)):
             self.assertEqual(agent_status.probe_agent("codex"), "Unverified")
