@@ -111,7 +111,7 @@ HELP = """NAVIGATION
 
 COMPONENT SELECTION
   Space              Toggle highlighted component
-  a / n              Select visible / clear all (Cleaner: ready safe only)
+  a / n              Select visible / clear all (Cleaner: all safe, even when filtered)
   /                  Filter by tool or group
   i                  Show full component details
   r                  Refresh agent plugin inventory
@@ -174,6 +174,7 @@ class DevboxTUI:
         self.cleaner_rows: dict[str, Scan] = {}
         self.cleaner_scan_task: asyncio.Task[None] | None = None
         self.cleaner_scan_generation = 0
+        self.cleaner_all_requested = False
         self.cleaner_list = self._make_cleaner_list()
         self.options = self._make_options([])
         self.confirm_plan = TextArea(text="", read_only=True, focusable=True,
@@ -378,11 +379,33 @@ class DevboxTUI:
     def _make_cleaner_list(self) -> KeyboardList:
         return KeyboardList(
             [], multiple=True, bulk_allowed=lambda entry: entry.key in SAFE_KEYS,
+            on_all=self._select_all_cleaners, on_manual_selection=self._clear_cleaner_all_intent,
             on_enter=self.confirm_cleaners, on_back=self.back, on_help=self._show_help,
             on_change=self._invalidate, on_refresh=self.open_cleaner,
             on_details=self._show_cleaner_info, on_filter=self._begin_filter,
             get_columns=self._component_list_width,
         )
+
+    def _clear_cleaner_all_intent(self) -> None:
+        self.cleaner_all_requested = False
+
+    def _select_all_cleaners(self) -> None:
+        # All is a global safe preset, not a snapshot of the visible or already
+        # measured rows. Manual changes cancel this intent.
+        self.cleaner_all_requested = True
+        self.cleaner_list.selected = {
+            entry.key for entry in self.cleaner_list.entries
+            if entry.selectable and entry.key in SAFE_KEYS
+        }
+        self._notice("All safe selected. Waiting for remaining safe checks..."
+                     if self._cleaner_all_pending() else
+                     "All available safe cleaners selected. Manual items excluded.")
+
+    def _cleaner_all_pending(self) -> bool:
+        return (self.cleaner_all_requested
+                and self.cleaner_scan_task is not None
+                and not self.cleaner_scan_task.done()
+                and bool(SAFE_KEYS - self.cleaner_rows.keys()))
 
     def _cleaner_entries(self) -> None:
         # Stable order and cursor: never rebuild the widget as results arrive.
@@ -399,6 +422,9 @@ class DevboxTUI:
         self.cleaner_list.selected.intersection_update(
             entry.key for entry in entries if entry.selectable
         )
+        if self.cleaner_all_requested:
+            self.cleaner_list.selected = {entry.key for entry in entries
+                                          if entry.selectable and entry.key in SAFE_KEYS}
         self._invalidate()
 
     def _cancel_cleaner_scan(self) -> None:
@@ -416,6 +442,7 @@ class DevboxTUI:
         self.action = "clean"
         self.dry_run = False
         self.cleaner_rows.clear()
+        self.cleaner_all_requested = False
         self.cleaner_list.selected.clear()
         self.filter_active = False
         self.cleaner_list.set_query("")
@@ -446,8 +473,9 @@ class DevboxTUI:
                 total = len(CLEANER_ITEMS)
                 ready = sum(row.available for row in self.cleaner_rows.values())
                 self._notice(f"{done}/{total} checked | {ready} ready | "
-                             + ("a = All ready safe; r = rescan" if done == total
-                                else "Scanning remaining items..."))
+                             + ("All safe: waiting for checks" if self._cleaner_all_pending() else
+                                "All safe selected" if self.cleaner_all_requested else
+                                "a = All safe; r = rescan" if done == total else "Scanning remaining items..."))
 
         await asyncio.gather(*(check(group) for group in PROBE_GROUPS))
 
@@ -457,13 +485,16 @@ class DevboxTUI:
         ready = sum(row.available for row in self.cleaner_rows.values())
         selected = self.cleaner_list.current_values
         manual = sum(key not in SAFE_KEYS for key in selected)
+        pending = len(SAFE_KEYS - self.cleaner_rows.keys()) if self._cleaner_all_pending() else 0
         width = 12
         filled = width * done // total
         return [
             ("class:running" if done < total else "class:checked",
              f"  {'Scanning' if done < total else 'Scan complete'} "
              f"[{'#' * filled}{'.' * (width - filled)}] {done}/{total}\n"),
-            ("class:body", f"  Ready {ready} | Selected {len(selected)} ({manual} manual) | All = ready safe only\n"),
+            ("class:body", f"  Ready {ready} | Selected {len(selected)} ({manual} manual)"
+             + (f" | All safe: {pending} pending" if pending else
+                " | All safe selected" if self.cleaner_all_requested else " | a = All safe") + "\n"),
         ]
 
     def _cleaner_details(self):
@@ -506,9 +537,12 @@ class DevboxTUI:
     def confirm_cleaners(self) -> None:
         if self.busy:
             return
+        if self._cleaner_all_pending():
+            self._notice("All safe: waiting for remaining safe checks before confirmation. Esc returns home.")
+            return
         self.selected = self.cleaner_list.current_values
         if not self.selected:
-            self._notice("Select a ready cleaner using Space or a (All ready safe).")
+            self._notice("Select a ready cleaner using Space or a (All safe).")
             return
         self.auto_added = []
         self._make_confirmation()
@@ -1154,6 +1188,12 @@ class DevboxTUI:
                 lines.append(f"  {risk:6}  {item.label} — {estimate}")
                 if not item.safe:
                     lines.append("          " + item.description)
+            if self.cleaner_all_requested:
+                excluded = [row for key, row in self.cleaner_rows.items()
+                            if key in SAFE_KEYS and not row.available]
+                if excluded:
+                    lines += ["", "Unavailable safe cleaners (not selected):"]
+                    lines += [f"  {CLEANER_ITEMS[row.key].label}: {row.note}" for row in excluded]
             lines += ["", "Estimates may overlap; eligibility is rechecked at execution."]
             if any(CLEANER_ITEMS[k].sudo for k in self.selected):
                 lines.append("Sudo authentication required for selected APT cleanup.")

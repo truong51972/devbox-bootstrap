@@ -1,7 +1,11 @@
 import unittest
 import asyncio
 from unittest.mock import patch
-from tui.cleaner import BY_KEY, SAFE_KEYS, PROBE_GROUPS, Scan, select_keys, docker_prefix, main
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import subprocess
+from tui.cleaner import (BY_KEY, SAFE_KEYS, PROBE_GROUPS, Scan, select_keys, docker_prefix,
+                         main, scan_group, size, pip_cache_command)
 from tui.app import DevboxTUI
 from tui.backend import build_command
 from tui.ui import Entry, KeyboardList
@@ -117,6 +121,41 @@ class CleanerTests(unittest.TestCase):
         self.assertFalse(app.busy)
         self.assertIn("acknowledge", app.message.lower())
 
+    def test_uppercase_all_is_global_and_manual_never_selected(self):
+        app = DevboxTUI()
+        app.cleaner_rows = {key: Scan(key, True, "1 MiB", "") for key in BY_KEY}
+        app._cleaner_entries()
+        widget = app.cleaner_list
+        widget.set_query("npm")
+        widget.current_values = ["docker-volumes"]
+        widget.window.content.key_bindings.get_bindings_for_keys(("A",))[-1].handler(None)
+        self.assertEqual(set(widget.current_values), SAFE_KEYS)
+        widget.window.content.key_bindings.get_bindings_for_keys(("N",))[-1].handler(None)
+        self.assertFalse(app.cleaner_all_requested)
+        self.assertEqual(widget.current_values, [])
+
+    @patch("tui.cleaner.run", side_effect=subprocess.TimeoutExpired("du", 12))
+    def test_measurement_timeout_does_not_disable_cache(self, _run):
+        with TemporaryDirectory() as tmp:
+            self.assertEqual(size(tmp), "unknown")
+            with patch("tui.cleaner.shutil.which", return_value="/bin/npm"), \
+                    patch("tui.cleaner.checked", return_value=tmp):
+                row = scan_group("npm-cache")[0]
+            self.assertTrue(row.available)
+            self.assertEqual(row.estimate, "unknown")
+
+    @patch("tui.cleaner.docker_df", side_effect=subprocess.TimeoutExpired("docker", 12))
+    @patch("tui.cleaner.checked", return_value="daemon-id")
+    @patch("tui.cleaner.docker_prefix", return_value=["docker", "--host", "unix:///docker.sock"])
+    @patch("tui.cleaner.shutil.which", return_value="/bin/docker")
+    def test_docker_size_timeout_falls_back_to_daemon_check(self, *_):
+        self.assertTrue(all(row.available and row.estimate == "unknown" for row in scan_group("docker")))
+
+    @patch("tui.cleaner.shutil.which", return_value="/bin/pip")
+    @patch("tui.cleaner.checked", side_effect=[RuntimeError("no system pip"), "/home/user/.cache/pip"])
+    def test_pip_falls_back_to_working_cli(self, *_):
+        self.assertEqual(pip_cache_command(), (["pip3"], "/home/user/.cache/pip"))
+
     def test_no_volume_or_tagged_image_in_safe_commands(self):
         for key in SAFE_KEYS:
             command = BY_KEY[key].command
@@ -126,6 +165,59 @@ class CleanerTests(unittest.TestCase):
 
 
 class ProgressiveScanTests(unittest.IsolatedAsyncioTestCase):
+    async def test_all_includes_late_safe_results_before_confirmation(self):
+        app = DevboxTUI()
+        release = asyncio.Event()
+        fast = asyncio.Event()
+
+        async def probe(group):
+            if group == "docker":
+                await release.wait()
+            if group == "pip-cache":
+                fast.set()
+            return [Scan(key, True, "1 MiB", "") for key in PROBE_GROUPS[group]]
+
+        with patch("tui.app.probe_group", side_effect=probe):
+            app.open_cleaner()
+            await asyncio.wait_for(fast.wait(), 1)
+            app._select_all_cleaners()
+            app.confirm_cleaners()
+            self.assertEqual(app.screen, "cleaner")
+            self.assertIn("waiting", app.message.lower())
+            release.set()
+            await app.cleaner_scan_task
+            self.assertEqual(set(app.cleaner_list.current_values), SAFE_KEYS)
+            app.confirm_cleaners()
+            self.assertEqual(app.screen, "confirm")
+            self.assertEqual(set(app.selected), SAFE_KEYS)
+            command = build_command("clean", app.selected)
+            self.assertEqual(set(command[command.index("--only") + 1].split(",")), SAFE_KEYS)
+
+    async def test_manual_deselect_cancels_auto_selection(self):
+        app = DevboxTUI()
+        release = asyncio.Event()
+        fast = asyncio.Event()
+
+        async def probe(group):
+            if group == "docker":
+                await release.wait()
+            if group == "pip-cache":
+                fast.set()
+            return [Scan(key, True, "1 MiB", "") for key in PROBE_GROUPS[group]]
+
+        with patch("tui.app.probe_group", side_effect=probe):
+            app.open_cleaner()
+            await asyncio.wait_for(fast.wait(), 1)
+            app._select_all_cleaners()
+            widget = app.cleaner_list
+            widget.index = next(i for i, entry in enumerate(widget.entries) if entry.key == "pip-cache")
+            widget.toggle()
+            self.assertFalse(app.cleaner_all_requested)
+            release.set()
+            await app.cleaner_scan_task
+            self.assertNotIn("pip-cache", widget.current_values)
+            self.assertNotIn("docker-build-cache", widget.current_values)
+
     async def test_slow_docker_does_not_block_fast_rows_or_back(self):
         app = DevboxTUI()
         release = asyncio.Event()
