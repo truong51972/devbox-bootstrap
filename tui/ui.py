@@ -17,15 +17,15 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 STYLE = {
     "header": "bg:default fg:ansicyan bold",
     "title": "fg:ansiwhite bold",
-    "section": "fg:ansibrightblack bold",
+    "section": "fg:ansicyan bold",
     "muted": "fg:ansibrightblack",
     "divider": "fg:ansibrightblack",
     "focus": "bg:ansiblue fg:ansiwhite bold",
     "checked": "fg:ansigreen bold",
-    "installed": "fg:ansigreen",
+    "installed": "fg:ansibrightgreen",
     "missing": "fg:ansibrightred bold",
-    "warning": "fg:ansiyellow",
-    "error": "fg:ansired",
+    "warning": "fg:ansibrightyellow",
+    "error": "fg:ansibrightred bold",
     "running": "fg:ansicyan bold",
     "footer": "fg:ansiwhite",
     "statusbar": "fg:ansibrightblack",
@@ -78,6 +78,27 @@ STATUS_STYLES = {
     "COMPLETED": "class:installed",
     "CLEANED": "class:installed",
 }
+
+def status_style(status: str) -> str:
+    """Use the same semantic palette for component, run and cleaner rows."""
+    if status in STATUS_STYLES:
+        return STATUS_STYLES[status]
+    if status.startswith(("SAFE | ", "MANUAL | ")):
+        risk, _, state = status.partition(" | ")
+        if state == "Checking...":
+            return "class:running"
+        if state == "Unavailable":
+            return "class:muted"
+        return "class:installed" if risk == "SAFE" else "class:warning"
+    return "class:muted"
+
+
+def focused_status_style(status: str, active: bool) -> str:
+    style = status_style(status)
+    if not active:
+        return style
+    # Muted text would be difficult to read on a blue focus background.
+    return "class:focus" if style == "class:muted" else "class:focus " + style
 
 
 @dataclass(frozen=True)
@@ -339,9 +360,7 @@ class KeyboardList:
                 gap = max(2, content_width - len(text) - len(entry.status))
                 fragments.append((row_style, text + " " * gap))
                 fragments.append((
-                    "class:focus class:missing" if active and entry.status == "Missing" else
-                    "class:focus" if active else
-                    STATUS_STYLES.get(entry.status, "class:muted"),
+                    focused_status_style(entry.status, active),
                     entry.status + "\n",
                 ))
             else:
