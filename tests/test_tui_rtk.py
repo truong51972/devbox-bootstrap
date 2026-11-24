@@ -92,6 +92,22 @@ class RtkStatusTests(unittest.TestCase):
         self.write(".config/opencode/plugins/rtk.ts", 'export default { "tool.execute.before": () => "rtk" }')
         self.assertEqual(rtk.integration_status("opencode", "Checking").state, "Installed")
 
+    def test_antigravity_plugin_bundle(self):
+        with patch("tui.rtk_status.Path.home", return_value=self.home):
+            self.assertEqual(rtk.integration_status("agy", "Checking").state, "Missing")
+            self.write(".gemini/config/plugins/rtk/plugin.json", '{"name":"rtk"}')
+            self.assertEqual(rtk.integration_status("agy", "Checking").state, "Unverified")
+            hooks = {"rtk-hook": {"PreToolUse": [{"matcher": "run_command", "hooks": [
+                {"type": "command", "command": "rtk hook antigravity"}
+            ]}]}}
+            path = self.write(".gemini/config/plugins/rtk/hooks.json", json.dumps(hooks))
+            self.assertEqual(rtk.integration_status("agy", "Checking").state, "Installed")
+            hooks["rtk-hook"]["enabled"] = False
+            path.write_text(json.dumps(hooks), encoding="utf-8")
+            self.assertEqual(rtk.integration_status("agy", "Checking").state, "Disabled")
+            self.assertEqual(rtk.integration_status("agy", "Unavailable").state, "Unavailable")
+            self.assertEqual(rtk.integration_status("gemini", "Checking").state, "Missing")
+
     def test_binary_and_agent_aggregate(self):
         binary = PluginStatus("rtk", "Installed", "binary", "/bin/rtk")
         agents = {"codex": PluginStatus("codex", "Installed", "config", "Hook configured"),
