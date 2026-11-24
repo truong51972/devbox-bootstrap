@@ -146,10 +146,60 @@ def _hook_status(path: Path, event: str, agent: str, root: Path) -> str | None:
     return None
 
 
+def _antigravity_status() -> PluginStatus:
+    """Inspect the upstream RTK global Antigravity plugin bundle."""
+    root = Path.home() / ".gemini/config/plugins/rtk"
+    manifest = _read(root / "plugin.json")
+    hooks = _read(root / "hooks.json")
+    if manifest is None and hooks is None:
+        return PluginStatus("agy", "Missing", "local plugin", "RTK plugin not configured")
+    if manifest is None or hooks is None:
+        return PluginStatus("agy", "Unverified", "local plugin", "Incomplete RTK plugin")
+    payload = json.loads(manifest)
+    config = json.loads(hooks)
+    if not isinstance(payload, dict) or payload.get("name") != "rtk" or not isinstance(config, dict):
+        return PluginStatus("agy", "Unverified", "local plugin", "Unknown RTK plugin format")
+    states = []
+    # Antigravity hook files map named hook groups to lifecycle events.
+    for group in config.values():
+        if not isinstance(group, dict):
+            continue
+        rows = group.get("PreToolUse", [])
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            handlers = row.get("hooks", [])
+            if not isinstance(handlers, list):
+                continue
+            for handler in handlers:
+                if not isinstance(handler, dict):
+                    continue
+                command = handler.get("command")
+                if not isinstance(command, str):
+                    continue
+                state = _native_or_wrapper(command, "antigravity", root)
+                if state is None:
+                    continue
+                if any(item.get("enabled") is False for item in (payload, group, row, handler)):
+                    state = "Disabled"
+                states.append(state)
+    for state in ("Installed", "Unverified", "Disabled"):
+        if state in states:
+            reason = {"Installed": "Plugin hook registered; activation unchecked",
+                      "Disabled": "Plugin hook disabled",
+                      "Unverified": "Hook could not be verified"}[state]
+            return PluginStatus("agy", state, "local plugin", reason)
+    return PluginStatus("agy", "Unverified", "local plugin", "RTK hook not recognized")
+
+
 def integration_status(agent: str, available: str) -> PluginStatus:
     if available == "Unavailable":
         return PluginStatus(agent, "Unavailable", "PATH", "CLI not installed")
     try:
+        if agent == "agy":
+            return _antigravity_status()
         if agent == "opencode":
             root = _home("XDG_CONFIG_HOME", ".config") / "opencode"
             root = Path(os.environ.get("OPENCODE_CONFIG_DIR") or root).expanduser()
