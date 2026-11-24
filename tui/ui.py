@@ -99,6 +99,7 @@ class KeyboardList:
         on_change: Callable[[], None],
         multiple: bool = False,
         bulk_select: bool = True,
+        bulk_allowed: Callable[[Entry], bool] | None = None,
         empty_text: str = "No matching entries. Press / to edit the filter.",
         get_columns: Callable[[], int] = lambda: 100,
         on_filter: Callable[[], None] | None = None,
@@ -180,7 +181,11 @@ class KeyboardList:
             @kb.add("a")
             def _all(_event) -> None:
                 # Preserve selected items hidden by an active filter.
-                self.selected.update(item.key for item in self.visible)
+                if bulk_allowed is None:
+                    self.selected.update(item.key for item in self.visible)
+                else:
+                    # A safe preset replaces prior manual selections, even if hidden.
+                    self.selected = {item.key for item in self.visible if bulk_allowed(item)}
                 self.on_change()
 
             @kb.add("n")

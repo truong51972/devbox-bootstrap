@@ -33,6 +33,7 @@ from tui.backend import (
 from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, installed, inventory, with_dependencies
 from tui.agent_status import AGENTS, LABELS, discover_agents, probe_agent, summary as ponytail_summary
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
+from tui.cleaner import BY_KEY as CLEANER_ITEMS, SAFE_KEYS, scan as scan_cleaners
 
 FINISHED_STATES = FINAL_STATES
 # Stable width across Home, Components and History; remaining columns go to the list.
@@ -42,13 +43,14 @@ MENU = (
     ("upgrade", "Upgrade components"),
     ("doctor", "Doctor - check configuration"),
     ("preflight", "Preflight - inspect host"),
+    ("clean", "Cleaner - reclaim disk space"),
     ("update", "Update Devbox source"),
     ("logs", "Logs and history"),
     ("exit", "Exit"),
 )
 MENU_GROUPS = {
     "install": "SETUP", "upgrade": "SETUP", "doctor": "SYSTEM",
-    "preflight": "SYSTEM", "update": "MAINTENANCE", "logs": "MAINTENANCE",
+    "preflight": "SYSTEM", "clean": "MAINTENANCE", "update": "MAINTENANCE", "logs": "MAINTENANCE",
     "exit": "MAINTENANCE",
 }
 MENU_DETAILS = {
@@ -56,6 +58,7 @@ MENU_DETAILS = {
     "upgrade": "Update selected tools without changing Devbox source.",
     "doctor": "Check binaries, services, permissions and configuration.",
     "preflight": "Inspect the system before attempting installation.",
+    "clean": "Scan developer caches. All selects safe items only; manual items require consent.",
     "update": "Fast-forward Devbox source and restart the application.",
     "logs": "Review past operations and their complete terminal output.",
     "exit": "Leave Devbox without modifying the system.",
@@ -166,6 +169,7 @@ class DevboxTUI:
 
         self.menu = self._make_menu()
         self.selector = self._make_selector()
+        self.cleaner_list = self._make_cleaner_list()
         self.options = self._make_options([])
         self.log_files = self._make_log_list([])
         self.status_view = TextArea(
@@ -363,6 +367,71 @@ class DevboxTUI:
             get_columns=self._component_list_width,
         )
 
+    def _make_cleaner_list(self) -> KeyboardList:
+        return KeyboardList(
+            [], multiple=True, bulk_allowed=lambda entry: entry.key in SAFE_KEYS,
+            on_enter=self.confirm_cleaners, on_back=self.back, on_help=self._show_help,
+            on_change=self._invalidate, on_refresh=self.open_cleaner,
+            empty_text="Scanning or no available cleaners. Press r to rescan.",
+            get_columns=self._component_list_width,
+        )
+
+    def open_cleaner(self) -> None:
+        if self.busy:
+            return
+        self.action = "clean"
+        self.dry_run = True
+        self.cleaner_list.entries = []
+        self.cleaner_list.selected.clear()
+        self.cleaner_list.index = 0
+        self.busy = True
+        self._notice("Scanning known caches (read-only)...")
+        self.navigate("cleaner", self.cleaner_list.window)
+        self.run_task = asyncio.create_task(self._scan_cleaners())
+
+    async def _scan_cleaners(self) -> None:
+        try:
+            rows = await asyncio.to_thread(scan_cleaners)
+            self.cleaner_list.entries = [
+                Entry(row.key, CLEANER_ITEMS[row.key].label,
+                      CLEANER_ITEMS[row.key].group,
+                      ("SAFE" if row.key in SAFE_KEYS else "MANUAL") + " " + row.estimate,
+                      CLEANER_ITEMS[row.key].description + "\n" + row.note)
+                for row in rows if row.available
+            ]
+            self._notice(f"{len(self.cleaner_list.entries)} available; a = safe only; Space = manual selection.")
+        except Exception as exc:
+            self._notice(f"Scan failed: {exc}")
+        finally:
+            self.busy = False
+            self._invalidate()
+
+    def _cleaner_details(self):
+        item = self.cleaner_list.current
+        return [("class:body", item.description if item else "No available cleanup item.")]
+
+    def _cleaner_layout(self):
+        if self.columns() >= 94:
+            return self._layout("cleaner-wide", lambda: VSplit([
+                self.cleaner_list.window, self._divider_v(),
+                self._text(self._cleaner_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
+            ], padding=1))
+        return self._layout("cleaner-narrow", lambda: HSplit([
+            self.cleaner_list.window, self._divider(),
+            self._text(self._cleaner_details, height=5),
+        ]))
+
+    def confirm_cleaners(self) -> None:
+        if self.busy:
+            return
+        self.selected = self.cleaner_list.current_values
+        if not self.selected:
+            self._notice("Select at least one cleaner.")
+            return
+        self.auto_added = []
+        self.dry_run = True
+        self._make_confirmation()
+
     def _make_options(self, entries: list[Entry]) -> KeyboardList:
         return KeyboardList(
             entries,
@@ -474,6 +543,10 @@ class DevboxTUI:
                 DynamicContainer(lambda: self._filter_layout()),
             ]),
             "↑↓ Move   Space Select   a All   n None   / Filter   i Info   r Refresh   Enter Next   Esc Back",
+        )
+        self.views["cleaner"] = self._page(
+            "Cleaner", DynamicContainer(self._cleaner_layout),
+            "Space Toggle   a All safe   n None   r Rescan   Enter Preview   Esc Back",
         )
         self.views["confirm"] = self._page(
             "Confirm", DynamicContainer(self._confirm_layout),
@@ -687,7 +760,7 @@ class DevboxTUI:
         return tokens
 
     def _progress_tokens(self):
-        active = [code for code in ORDER if self.status.get(code) != "--"]
+        active = [code for code, state in self.status.items() if state != "--"]
         complete = [
             code for code in active if self.status[code] in FINAL_STATES
         ]
@@ -869,6 +942,7 @@ class DevboxTUI:
             self.quit()
         elif action in ("install", "upgrade"):
             self.action = action
+            self.dry_run = False
             # Preserve last inventory while navigating; refresh lazily after TTL.
             self.selector = self._make_selector()
             self._layout_cache.pop("select-wide", None)
@@ -878,6 +952,8 @@ class DevboxTUI:
             self._notice(f"Select tools to {action}. Space toggles the highlighted row.")
             self.navigate("select", self.selector.window)
             self._schedule_agent_scan()
+        elif action == "clean":
+            self.open_cleaner()
         elif action == "logs":
             self.list_history()
         elif action == "update":
@@ -902,6 +978,8 @@ class DevboxTUI:
 
     def _make_confirmation(self) -> None:
         options: list[Entry] = []
+        if self.action == "clean" and any(k not in SAFE_KEYS for k in self.selected):
+            options.append(Entry("risk", "I accept permanent loss of manually selected resources"))
         if self.action == "install":
             if "zsh" in self.selected:
                 options.append(Entry("change_shell", "Set Zsh as login shell"))
@@ -915,7 +993,8 @@ class DevboxTUI:
                         options.append(Entry("agent_" + agent, "Integrate with " + label))
         self.options = self._make_options(options)
         self._layout_cache.pop("confirm", None)
-        self._notice("Review the plan. Optional changes are OFF by default.")
+        self._notice("Review the plan. Optional changes are OFF by default." if self.action != "clean"
+                     else "Dry-run ON. Press d to enable deletion; manual items require consent.")
         self.navigate("confirm", self.options.window)
 
     def _chosen_agents(self) -> list[str]:
@@ -925,6 +1004,11 @@ class DevboxTUI:
         return [agent for agent, _, _ in AGENT_EXECUTABLES if "agent_" + agent in selected]
 
     def _selection_summary(self) -> str:
+        if self.action == "clean":
+            mode = "DRY RUN (no deletion)" if self.dry_run else "REAL CLEANUP"
+            risks = "\n".join(CLEANER_ITEMS[k].description for k in self.selected if k not in SAFE_KEYS)
+            return mode + "\n" + ", ".join(self.selected) + "\n" + risks + (
+                "\nPolicy applies to eligible resources at execution. Estimates may overlap.")
         if self.action == "update":
             return "Update Devbox source\nFast-forward only\nRestart the TUI after updating."
         added = f"\nAuto-added: {', '.join(self.auto_added)}" if self.auto_added else ""
@@ -967,7 +1051,8 @@ class DevboxTUI:
         chosen = list(self.selector.current_values) if selected is None and action in ("install", "upgrade") else list(selected or [])
         try:
             command = build_command(action, chosen, dry_run=self.dry_run,
-                                    agents=self._chosen_agents() if action == "install" else [])
+                                    agents=self._chosen_agents() if action == "install" else [],
+                                    allow_risky=action == "clean" and "risk" in self.options.current_values)
         except ValueError as exc:
             self._notice(str(exc))
             return
@@ -975,7 +1060,8 @@ class DevboxTUI:
         # Reserve the slot before creating a task: rapid Enter cannot overlap APT.
         self.busy = True
         self.current_action = action.title()
-        self.status = {code: ("QUEUED" if code in chosen else "--") for code in ORDER}
+        self.status = {code: ("QUEUED" if code in chosen else "--")
+                       for code in (CLEANER_ITEMS if action == "clean" else ORDER)}
         self.log_path = None
         self.event_path = None
         self.event_offset = 0
@@ -1019,7 +1105,9 @@ class DevboxTUI:
         try:
             # User-scoped AI extensions never need the preflight sudo prompt.
             needs_sudo = any(code not in {"rtk", "skills-cli", "ponytail"} for code in selected)
-            if action in ("install", "upgrade") and needs_sudo and not self.dry_run:
+            if action == "clean":
+                needs_sudo = any(CLEANER_ITEMS[key].sudo for key in selected)
+            if action in ("install", "upgrade", "clean") and needs_sudo and not self.dry_run:
                 if not await self._authorize_sudo():
                     code = 1
                     self.last_result = "Cannot start: sudo authentication not completed."
@@ -1091,10 +1179,10 @@ class DevboxTUI:
 
     def _render_status(self) -> str:
         rows = [f"  {self.current_action or 'Idle'}", ""]
-        for code in ORDER:
+        for code in self.status:
             if self.status[code] != "--":
                 value = self.status[code]
-                marker = "✓" if value in {"INSTALLED", "CONFIGURED", "UPDATED", "UP_TO_DATE"} else (
+                marker = "✓" if value in {"INSTALLED", "CONFIGURED", "UPDATED", "UP_TO_DATE", "CLEANED"} else (
                     "!" if value == "FAILED" else ">" if value == "RUNNING" else "·"
                 )
                 rows.append(f"  {marker}  {code:<16} {value}")
@@ -1185,7 +1273,12 @@ class DevboxTUI:
             target = self.previous_screen
             self.navigate(target, self._focus_for(target))
         elif self.screen == "confirm":
-            self.navigate("select", self.selector.window) if self.action != "update" else self.navigate("home", self.menu.window)
+            if self.action == "clean":
+                self.navigate("cleaner", self.cleaner_list.window)
+            elif self.action == "update":
+                self.navigate("home", self.menu.window)
+            else:
+                self.navigate("select", self.selector.window)
         elif self.screen == "info":
             self.navigate("select", self.selector.window)
         elif self.screen in ("select", "logs") and self.filter_active:
@@ -1194,12 +1287,13 @@ class DevboxTUI:
             self.filter_input.text = ""
             self._active_list().set_query("")
             self._notice("Filter cleared. Press Esc again to return.")
-        elif self.screen in ("select", "result", "logs"):
+        elif self.screen in ("select", "result", "logs", "cleaner"):
             self.navigate("home", self.menu.window)
 
     def _focus_for(self, screen: str):
         return {
             "home": self.menu.window, "select": self.selector.window,
+            "cleaner": self.cleaner_list.window,
             "confirm": self.options.window, "result": self.results_view,
             "logs": self.log_files.window, "view_log": self.history_view,
             "run": self.status_view, "info": self.info_view,

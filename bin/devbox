@@ -100,6 +100,7 @@ Usage: devbox [OPTION]
   --update         Pull latest Devbox source from GitHub (fast-forward only)
   --setup-runtime  Create/update isolated venv (uv first; Python fallback)
   --version        Show installed Devbox Git revision
+  --clean ...      Scan or explicitly clean developer caches (see --clean --help)
   --doctor         Run read-only diagnostics via the Bash backend
   --preflight      Inspect host environment
   --upgrade ...    Upgrade installed tools (not Devbox source code)
@@ -123,6 +124,13 @@ HELP
         fi
         cd "$root"
         exec "$venv/bin/python" -m tui.app ;;
+    --clean)
+        shift
+        cd "$root"
+        if [[ -x "$venv/bin/python" ]]; then
+            exec "$venv/bin/python" -m tui.cleaner "$@"
+        fi
+        exec python3 -m tui.cleaner "$@" ;;
     --doctor|--preflight|--upgrade|--dry-run|--only|--kubectl-version)
         exec bash "$root/setup-ubuntu.sh" "$@" ;;
     *)
