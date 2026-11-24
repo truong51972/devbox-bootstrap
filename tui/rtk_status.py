@@ -82,7 +82,14 @@ def _native_or_wrapper(command: str, agent: str, root: Path) -> str | None:
         tokens = shlex.split(command)
     except ValueError:
         return "Unverified" if "rtk" in command else None
-    for index, token in enumerate(tokens):
+    if not tokens:
+        return None
+    # Only accept a command invocation, not a mention in echo/printf/etc.
+    if Path(tokens[0]).name in ("bash", "sh", "zsh"):
+        tokens = tokens[1:]
+    if not tokens:
+        return None
+    for index, token in enumerate(tokens[:1]):
         name = Path(token).name
         if name in ("rtk", "rtk.exe") and tokens[index + 1:index + 3] == ["hook", agent]:
             return "Installed"
@@ -212,8 +219,10 @@ def main() -> int:
     for agent in targets:
         status = inventory.agents[agent]
         print(f"RTK / {LABELS[agent]}: {status.state} ({status.reason})")
-    return int(args.verify and (inventory.binary.state != "Installed" or
-               any(inventory.agents[agent].state != "Installed" for agent in targets)))
+    if args.verify:
+        return int(inventory.binary.state != "Installed" or
+                   any(inventory.agents[agent].state != "Installed" for agent in targets))
+    return int(inventory.binary.state == "Unverified")
 
 
 if __name__ == "__main__":
