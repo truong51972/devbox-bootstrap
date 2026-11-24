@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import shutil
 import subprocess
 
@@ -47,7 +48,7 @@ ORDER = tuple(code for code, _ in COMPONENTS)
 def executable(name: str) -> bool:
     home = Path.home()
     return bool(shutil.which(name) or any(
-        (home / sub / name).is_file()
+        (home / sub / name).is_file() and os.access(home / sub / name, os.X_OK)
         for sub in (".local/bin", ".cargo/bin")
     ))
 
@@ -80,6 +81,10 @@ def inventory(ponytail_agents: dict[str, str] | None = None,
         if quick and code == "rtk":
             # Avoid launching rtk gain on the UI thread; verify asynchronously.
             result[code] = "Unverified" if executable("rtk") else "Missing"
+        elif code == "bat-fd":
+            bat = executable("bat") or executable("batcat")
+            fd = executable("fd") or executable("fdfind")
+            result[code] = "Installed" if bat and fd else "Partial" if bat or fd else "Missing"
         else:
             result[code] = "Installed" if installed(code) else "Missing"
     states = discover_agents() if ponytail_agents is None else ponytail_agents

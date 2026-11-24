@@ -28,18 +28,20 @@ from prompt_toolkit.widgets import TextArea
 
 from tui.backend import (
     ROOT, STATE_ROOT, FINAL_STATES, build_command, log_tail, log_preview,
-    read_events,
+    read_events, read_run_events,
 )
 from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, installed, inventory, with_dependencies
 from tui.agent_status import AGENTS, LABELS, discover_agents, probe_agent, summary as ponytail_summary
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
 from tui.update_check import UpdateCheck, check_update
+from tui.views import DevboxViews, DETAIL_PANEL_WIDTH
+from tui.tasks import BackgroundTasks
+from tui.reporting import RunReport, read_report, write_report, summarize_status, status_lines
 from tui.cleaner import (BY_KEY as CLEANER_ITEMS, SAFE_KEYS, PROBE_GROUPS,
                          PROBE_CONCURRENCY, Scan, probe_group)
 
 FINISHED_STATES = FINAL_STATES
 # Stable width across Home, Components and History; remaining columns go to the list.
-DETAIL_PANEL_WIDTH = 42
 MENU = (
     ("install", "Install components"),
     ("upgrade", "Upgrade components"),
@@ -136,8 +138,11 @@ Full logs are under ~/.local/state/devbox-bootstrap/logs.
 """
 
 
-class DevboxTUI:
+class DevboxTUI(DevboxViews):
     def __init__(self) -> None:
+        self.tasks = BackgroundTasks()
+        self.run_report: RunReport | None = None
+        self.outcome_details: dict[str, str] = {}
         self.screen = "home"
         self.previous_screen = "home"
         self.help_return_screen = "home"
@@ -264,11 +269,11 @@ class DevboxTUI:
         if os.environ.get("DEVBOX_CHECK_UPDATES", "1") == "0":
             return
         self._notice("Checking for Devbox updates...")
-        self.update_check_task = self.app.create_background_task(self._check_startup_update())
+        self.update_check_task = self.tasks.start("update", self._check_startup_update())
 
     def _cancel_update_check(self) -> None:
         if self.update_check_task is not None and not self.update_check_task.done():
-            self.update_check_task.cancel()
+            self.tasks.cancel("update")
         self.pending_update = None
 
     async def _check_startup_update(self) -> None:
@@ -362,6 +367,9 @@ class DevboxTUI:
         self._invalidate()
 
     def _refresh_agent_status(self) -> None:
+        self.available.update(inventory(self.ponytail_agents, quick=True))
+        for code, value in self.available.items():
+            self._set_component_status(code, value)
         self._schedule_agent_scan(force=True)
 
     def _invalidate_agent_scan(self) -> None:
@@ -369,7 +377,7 @@ class DevboxTUI:
         self._agent_scan_generation += 1
         self._agent_scan_completed_at = 0.0
         if self._agent_scan_task is not None and not self._agent_scan_task.done():
-            self._agent_scan_task.cancel()
+            self.tasks.cancel("agents")
         self._agent_scan_task = None
 
     def _schedule_agent_scan(self, *, force: bool = False) -> None:
@@ -394,7 +402,7 @@ class DevboxTUI:
             # Headless/unit tests may manipulate the TUI outside an event loop.
             return
         self._agent_scan_generation += 1
-        self._agent_scan_task = loop.create_task(
+        self._agent_scan_task = self.tasks.start("agents",
             self._scan_agent_status(self._agent_scan_generation)
         )
 
@@ -416,7 +424,7 @@ class DevboxTUI:
             except Exception:
                 valid = False
             if generation == self._agent_scan_generation:
-                self._set_component_status("rtk", "Installed" if valid else "Missing")
+                self._set_component_status("rtk", "Installed" if valid else ("Unverified" if shutil.which("rtk") or (Path.home() / ".local/bin/rtk").is_file() else "Missing"))
 
         tasks = [
             check_agent(agent) for agent in AGENTS
@@ -510,7 +518,7 @@ class DevboxTUI:
     def _cancel_cleaner_scan(self) -> None:
         self.cleaner_scan_generation += 1
         if self.cleaner_scan_task is not None and not self.cleaner_scan_task.done():
-            self.cleaner_scan_task.cancel()
+            self.tasks.cancel("cleaner")
         self.cleaner_scan_task = None
 
     def open_cleaner(self) -> None:
@@ -530,7 +538,7 @@ class DevboxTUI:
         self._notice("Read-only scan started. Select ready items or press Esc.")
         self.navigate("cleaner", self.cleaner_list.window)
         self.cleaner_scan_generation += 1
-        self.cleaner_scan_task = asyncio.create_task(
+        self.cleaner_scan_task = self.tasks.start("cleaner",
             self._scan_cleaners(self.cleaner_scan_generation)
         )
 
@@ -596,24 +604,6 @@ class DevboxTUI:
         self.info_view.text = "".join(text for _, text in self._cleaner_details())
         self.navigate("cleaner_info", self.info_view)
 
-    def _cleaner_layout(self):
-        summary = lambda: self._text(self._cleaner_summary, height=2)
-        if self.columns() >= 94:
-            return self._layout("cleaner-wide", lambda: HSplit([
-                summary(), self._divider(), VSplit([
-                    self.cleaner_list.window, self._divider_v(),
-                    self._text(self._cleaner_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
-                ], padding=1),
-            ]))
-        if self.rows() >= 25 and self.columns() >= 64:
-            return self._layout("cleaner-medium", lambda: HSplit([
-                summary(), self._divider(), self.cleaner_list.window, self._divider(),
-                self._text(self._cleaner_details, height=6),
-            ]))
-        return self._layout("cleaner-narrow", lambda: HSplit([
-            summary(), self._divider(), self.cleaner_list.window,
-        ]))
-
     def confirm_cleaners(self) -> None:
         if self.busy:
             return
@@ -653,7 +643,9 @@ class DevboxTUI:
                          f"{hour[:2]}:{hour[2:4]} UTC")
             else:
                 title = path.name
-            entries.append(Entry(str(path), title, description=str(path)))
+            report = read_report(path)
+            entries.append(Entry(str(path), title, status=report.heading if report else "",
+                                 description=str(path)))
         return KeyboardList(
             entries,
             empty_text="No saved logs found.",
@@ -668,236 +660,6 @@ class DevboxTUI:
     def _invalidate(self) -> None:
         if hasattr(self, "app"):
             self.app.invalidate()
-
-    def _text(self, render, *, height=None, width=None):
-        return Window(
-            content=FormattedTextControl(render, focusable=False, show_cursor=False),
-            height=height, width=width, wrap_lines=True, style="class:body",
-        )
-
-    def _divider(self):
-        return Window(height=1, char="─", style="class:divider")
-
-    @staticmethod
-    def _truncate(message: str, width: int) -> str:
-        """Prevent one-line header/footer/notice text from being clipped mid-key."""
-        if width <= 0:
-            return ""
-        return message if len(message) <= width else (
-            message[:max(0, width - 1)] + "…"
-        )
-
-    def _page(self, title: str, body, shortcut: str):
-        compact = {
-            "Main menu": "↑↓ Move  Enter Open  t Theme  ? Help  q Quit",
-            "Components": "↑↓ Move  Space Toggle  / Filter  i Info  r Refresh  Enter Next",
-            "Cleaner": "Space Toggle  a Safe  / Filter  i Info  r Scan  Enter Next  Esc",
-            "Confirm": "Space Options  d Dry-run  Enter Run  Esc Back",
-            "Execution": "l Expand log  Exit locked",
-            "Result": "l Log  Enter Home  Esc Back",
-            "History": "↑↓ Move  / Filter  Enter Open  Esc Back",
-            "Log viewer": "↑↓ Scroll  o Pager  Esc Back",
-            "Keyboard help": "Esc Back",
-            "Component details": "Esc Back",
-        }
-        def header_text():
-            width = max(0, self.columns() - 2)
-            suffix = "     Ubuntu / WSL" if width >= 75 else ""
-            value = self._truncate(
-                f"  DEVBOX / {title.upper()}{suffix}", width
-            )
-            return [("class:header", value)]
-
-        def notice_text():
-            return [("class:statusbar", self._truncate(
-                "  " + self.message, max(0, self.columns() - 1)
-            ))]
-
-        def footer_text():
-            width = max(0, self.columns() - 2)
-            value = (self._confirm_shortcuts() if title == "Confirm" else
-                     compact.get(title, shortcut) if width < 85 else shortcut)
-            return [("class:footer", self._truncate("  " + value, width))]
-
-        return HSplit([
-            self._text(header_text, height=1),
-            self._divider(),
-            body,
-            self._text(notice_text, height=1),
-            self._text(footer_text, height=1),
-        ])
-
-    def _build_views(self) -> None:
-        self.views["home"] = self._page(
-            "Main menu",
-            DynamicContainer(self._home_layout),
-            "↑↓/j/k Navigate   Enter Open   t Theme   ? Help   q Quit",
-        )
-        self.views["update_prompt"] = self._page(
-            "Update available", HSplit([
-                self._text(self._update_details, height=Dimension(min=5, preferred=9)),
-                self._divider(), self.update_choices.window,
-            ]), "↑↓ Choose   Enter Confirm   y Yes   n No   Esc No",
-        )
-        self.views["select"] = self._page(
-            "Components",
-            HSplit([
-                DynamicContainer(self._selection_layout),
-                DynamicContainer(lambda: self._filter_layout()),
-            ]),
-            "↑↓ Move   Space Select   a All   n None   / Filter   i Info   r Refresh   Enter Next   Esc Back",
-        )
-        self.views["cleaner"] = self._page(
-            "Cleaner", HSplit([DynamicContainer(self._cleaner_layout),
-                               DynamicContainer(self._filter_layout)]),
-            "Space Toggle   a All safe   n None   / Filter   i Info   r Refresh   Enter Next   Esc Back",
-        )
-        self.views["cleaner_info"] = self._page("Cleaner details", self.info_view, "Esc Back to Cleaner")
-        self.views["confirm"] = self._page(
-            "Confirm", DynamicContainer(self._confirm_layout),
-            "Space Toggle options   d Dry-run   Enter Execute   Esc Back",
-        )
-        self.views["run"] = self._page(
-            "Execution", DynamicContainer(self._run_layout),
-            "l Expand/collapse output   Task active · exit locked",
-        )
-        self.views["result"] = self._page(
-            "Result", self.results_view,
-            "l View log   Enter Home   Esc Home   ? Help",
-        )
-        self.views["logs"] = self._page(
-            "History", HSplit([
-                DynamicContainer(self._logs_layout),
-                DynamicContainer(lambda: self._filter_layout()),
-            ]),
-            "↑↓/j/k Browse   / Filter   Enter View log   Esc Back",
-        )
-        self.views["view_log"] = self._page(
-            "Log viewer", self.history_view,
-            "↑↓/PgUp/PgDn Scroll   o External pager   Esc Back",
-        )
-        self.views["help"] = self._page(
-            "Keyboard help", self.help_view, "Esc Back",
-        )
-        self.views["info"] = self._page(
-            "Component details", self.info_view,
-            "Esc Back to components",
-        )
-
-    def _layout(self, key: str, build):
-        """Keep Window/HSplit instances stable across prompt_toolkit redraws."""
-        if key not in self._layout_cache:
-            self._layout_cache[key] = build()
-        return self._layout_cache[key]
-
-    def _divider_v(self):
-        return Window(char="│", width=1, style="class:divider")
-
-    def _home_layout(self):
-        if self.columns() >= 94:
-            return self._layout("home-wide", lambda: VSplit([
-                self.menu.window, self._divider_v(),
-                self._text(self._home_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
-            ], padding=1))
-        if self.rows() >= 26:
-            return self._layout("home-medium", lambda: HSplit([
-                self.menu.window, self._divider(),
-                self._text(self._home_details, height=5),
-            ]))
-        return self.menu.window
-
-    def _selection_layout(self):
-        if self.columns() >= 94:
-            return self._layout("select-wide", lambda: VSplit([
-                self.selector.window, self._divider_v(),
-                self._text(self._component_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
-            ], padding=1))
-        if self.rows() >= 25 and self.columns() >= 64:
-            return self._layout("select-medium", lambda: HSplit([
-                self.selector.window, self._divider(),
-                self._text(self._component_details, height=6),
-            ]))
-        return self.selector.window
-
-    def _filter_layout(self):
-        from prompt_toolkit.layout import ConditionalContainer
-        return self._layout("filter", lambda: ConditionalContainer(
-            content=self.filter_input,
-            filter=Condition(lambda: self.filter_active),
-        ))
-
-    def _confirm_shortcuts(self):
-        primary = "Enter Preview" if self.dry_run and self.action != "update" else {
-            "install": "Enter Install", "upgrade": "Enter Upgrade",
-            "clean": "Enter Clean", "update": "Enter Update",
-        }.get(self.action, "Enter Run")
-        keys = [primary, "Esc Back"]
-        if self.action != "update":
-            keys.insert(1, "d Dry-run")
-        if self.options.entries:
-            keys.extend(["Space Options", "Tab Focus"])
-        return "  ".join(keys)
-
-    def _confirm_mode(self):
-        preview = self.dry_run and self.action != "update"
-        requires_consent = (self.action == "clean" and bool(self.options.entries)
-                            and "risk" not in self.options.current_values and not preview)
-        return [
-            ("class:warning" if preview or requires_consent else "class:title",
-             "  DRY RUN — no changes\n" if preview else
-             "  MANUAL CLEANUP — consent required\n" if requires_consent else
-             "  APPLY CHANGES — Enter to confirm\n"),
-        ]
-
-    def _refresh_confirm_plan(self):
-        if hasattr(self, "confirm_plan"):
-            value = self._selection_summary()
-            if self.confirm_plan.text != value:
-                self.confirm_plan.text = value
-        self._invalidate()
-
-    def _confirm_layout(self):
-        def build():
-            # The plan is focusable/scrollable even when there are no options.
-            children = [self._text(self._confirm_mode, height=1), self._divider(),
-                        self.confirm_plan]
-            if self.options.entries:
-                children += [
-                    self._divider(),
-                    self._text(lambda: [("class:section",
-                        "  REQUIRED CONSENT" if self.action == "clean" else
-                        "  OPTIONS (OFF BY DEFAULT)")], height=1),
-                    self.options.window,
-                ]
-                # Allocate only as much space as the actual choices need.
-                self.options.window.height = Dimension(
-                    min=1, preferred=min(8, len(self.options.entries) + 2), max=12)
-            return HSplit(children)
-        return self._layout("confirm", build)
-
-    def _confirm_focus(self):
-        return self.options.window if self.options.entries else self.confirm_plan
-
-
-    def _run_layout(self):
-        return self._layout("run", lambda: HSplit([
-            self._text(self._progress_tokens, height=2),
-            self.status_view,
-            self._divider(),
-            self._text(lambda: [
-                ("class:section", "  EXPANDED OUTPUT" if self.expanded_log
-                 else "  RECENT OUTPUT"),
-            ], height=1),
-            self.log_view,
-        ]))
-
-    def _logs_layout(self):
-        if self.columns() >= 94:
-            return self._layout("logs-wide", lambda: VSplit([
-                self.log_files.window, self._divider_v(),
-                self._text(self._history_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
-            ], padding=1))
-        return self.log_files.window
 
     def _home_details(self):
         item = self.menu.current
@@ -982,7 +744,7 @@ class DevboxTUI:
             ("class:section", "\n  QUICK ACTIONS\n"),
             ("class:muted", "  Space  Select / deselect\n"),
             ("class:muted", "  /      Filter components\n"),
-            ("class:muted", "  r      Refresh agent status\n"),
+            ("class:muted", "  r      Refresh inventory\n"),
             ("class:muted", "  Enter  Continue\n"),
         ])
         return out
@@ -1017,8 +779,11 @@ class DevboxTUI:
             size, mtime_ns = stat.st_size, stat.st_mtime_ns
         except OSError:
             size, mtime_ns = 0, 0
+        report = read_report(path)
+        summary = (f"  {report.heading} | {report.duration:.1f}s\n  {summarize_status(report.status)}\n" if report else "  Legacy log (no structured report)\n")
         return [
             ("class:section", "  SELECTED RUN\n\n"),
+            ("class:body", summary),
             ("class:title", "  " + item.label + "\n\n"),
             ("class:muted", f"  Size: {size:,} bytes\n"),
             ("class:muted", "  " + str(path) + "\n\n"),
@@ -1202,6 +967,7 @@ class DevboxTUI:
             self.quit()
         elif action in ("install", "upgrade"):
             self.action = action
+            self.available = inventory(self.ponytail_agents, quick=True)
             self.dry_run = False
             # Preserve last inventory while navigating; refresh lazily after TTL.
             self.selector = self._make_selector()
@@ -1370,6 +1136,8 @@ class DevboxTUI:
         # Reserve the slot before creating a task: rapid Enter cannot overlap APT.
         self.busy = True
         self.current_action = action.title() + (" (dry-run)" if self.dry_run and action in ("install", "upgrade", "clean") else "")
+        self.run_report = None
+        self.outcome_details = {}
         self.status = {code: ("QUEUED" if code in chosen else "--")
                        for code in (CLEANER_ITEMS if action == "clean" else ORDER)}
         self.log_path = None
@@ -1412,6 +1180,8 @@ class DevboxTUI:
     async def _run(self, action: str, command: list[str], selected: list[str]) -> None:
         keepalive: asyncio.Task[None] | None = None
         code: int | None = None
+        started = time.monotonic()
+        timestamp = datetime.now(timezone.utc).isoformat()
         try:
             # User-scoped AI extensions never need the preflight sudo prompt.
             needs_sudo = any(code not in {"rtk", "skills-cli", "ponytail"} for code in selected)
@@ -1476,11 +1246,17 @@ class DevboxTUI:
             self.process = None
             self.busy = False
             self.last_code = code
-            if code != 0:
-                for component in selected:
-                    if self.status[component] in ("RUNNING", "QUEUED"):
-                        self.status[component] = ("FAILED" if self.status[component] == "RUNNING"
-                                                  else "NOT_RUN")
+            for component in selected:
+                if self.status.get(component) in ("RUNNING", "QUEUED"):
+                    self.status[component] = ("FAILED" if code != 0 and self.status[component] == "RUNNING" else "NOT_RUN")
+            self.run_report = RunReport(action, timestamp, round(time.monotonic() - started, 2),
+                                        code, self.dry_run, {k: v for k, v in self.status.items() if v != "--"},
+                                        dict(self.outcome_details), self.last_result)
+            if self.log_path is not None:
+                try:
+                    write_report(self.log_path, self.run_report)
+                except OSError as exc:
+                    self.last_result += f" (report not saved: {exc})"
             # Changes to agent plugins can occur during install; invalidate the
             # cached report for the next Components screen, without blocking Result.
             self._invalidate_agent_scan()
@@ -1495,21 +1271,15 @@ class DevboxTUI:
                 self.navigate("result", self.results_view)
 
     def _render_status(self) -> str:
-        rows = [f"  {self.current_action or 'Idle'}", ""]
-        for code in self.status:
-            if self.status[code] != "--":
-                value = self.status[code]
-                marker = "✓" if value in {"INSTALLED", "CONFIGURED", "UPDATED", "UP_TO_DATE", "CLEANED"} else (
-                    "!" if value == "FAILED" else ">" if value == "RUNNING" else "·"
-                )
-                rows.append(f"  {marker}  {code:<16} {value}")
-        return "\n".join(rows) if len(rows) > 2 else "Waiting for status events..."
+        labels = dict(COMPONENTS) | {key: item.label for key, item in CLEANER_ITEMS.items()}
+        return status_lines(self.current_action, self.status, labels, self.outcome_details)
 
     def _refresh(self) -> None:
-        events, self.event_offset = read_events(self.event_path, self.event_offset)
+        events, details, self.event_offset = read_run_events(self.event_path, self.event_offset)
         for name, state in events:
-            if name in self.status:
+            if name in self.status and (state in FINAL_STATES or state == "RUNNING"):
                 self.status[name] = state
+        self.outcome_details.update((name, detail) for name, detail in details if name in self.status)
         status_text = self._render_status()
         log_text = log_tail(
             self.log_path, count=25 if self.expanded_log else 10
@@ -1527,10 +1297,13 @@ class DevboxTUI:
             self._invalidate()
 
     def _render_result(self) -> None:
-        heading = "SUCCESS" if self.last_code == 0 else "FAILED"
-        lines = [f"  {heading} — {self.current_action}: {self.last_result}", "",
-                 self._render_status(), "", f"  Full log: {self.log_path or '(not created)'}",
-                 "", "  LAST OUTPUT", log_tail(self.log_path, count=22)]
+        report = self.run_report
+        heading = report.heading if report else ("SUCCESS" if self.last_code == 0 else "FAILED")
+        lines = [f"  {heading} — {self.current_action}: {self.last_result}", ""]
+        if report:
+            lines.extend([f"  Duration: {report.duration:.1f}s | {summarize_status(report.status)}", ""])
+        lines.extend([self._render_status(), "", f"  Full log: {self.log_path or '(not created)'}",
+                      "", "  LAST OUTPUT", log_tail(self.log_path, count=22)])
         self.results_view.text = "\n".join(lines)
 
     def list_history(self) -> None:
@@ -1630,10 +1403,17 @@ class DevboxTUI:
             return
         self._cancel_cleaner_scan()
         self._cancel_update_check()
+        self._invalidate_agent_scan()
+        self.tasks.cancel_all()
         self.app.exit()
 
     def run(self) -> None:
-        asyncio.run(self.app.run_async(pre_run=self._start_update_check))
+        async def session():
+            try:
+                await self.app.run_async(pre_run=self._start_update_check)
+            finally:
+                await self.tasks.close()
+        asyncio.run(session())
         if self.exit_message:
             print(self.exit_message)
 

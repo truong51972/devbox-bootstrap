@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 
 from tui.catalog import COMPONENTS
@@ -98,8 +99,14 @@ def log_preview(path: Path, *, max_bytes: int = 1024 * 1024) -> str:
 
 
 def read_events(path: Path | None, offset: int) -> tuple[list[tuple[str, str]], int]:
+    events, _, offset = read_run_events(path, offset)
+    return events, offset
+
+
+def read_run_events(path: Path | None, offset: int):
     if path is None or not path.is_file():
-        return [], offset
+        return [], [], offset
+    details = []
     events: list[tuple[str, str]] = []
     with path.open("rb") as stream:
         stream.seek(0, os.SEEK_END)
@@ -110,8 +117,15 @@ def read_events(path: Path | None, offset: int) -> tuple[list[tuple[str, str]], 
             line = stream.readline()
             if not line or not line.endswith(b"\n"):
                 break
-            fields = line.decode("utf-8", errors="replace").strip().split("\t")
+            fields = line.decode("utf-8", errors="replace").rstrip("\r\n").split("\t", 2)
             if len(fields) == 3 and fields[0] == "STATUS" and all(fields[1:]):
                 events.append((fields[1], fields[2]))
+            elif len(fields) == 3 and fields[0] == "DETAIL":
+                try:
+                    detail = json.loads(fields[2])
+                    if isinstance(detail, str):
+                        details.append((fields[1], detail[:1000]))
+                except ValueError:
+                    pass
             offset = stream.tell()
-    return events, offset
+    return events, details, offset

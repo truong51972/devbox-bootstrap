@@ -327,3 +327,7 @@ bash tests/upgrade-binary.sh
 ```
 
 CI also runs ShellCheck. Tests do not perform real package installations.
+
+### Structured run history
+
+New TUI runs save a versioned JSON summary next to the raw log, including action, duration, exit code, dry-run, per-component states and reported cleaner details. Old logs remain readable. Result distinguishes preview, partial, failed and successful execution; disk-footprint changes are not summed as guaranteed physical storage reclaimed. Background discovery tasks are owned and cancelled on exit, and the existing view layout lives in a separate presentation module. No additional dependencies are required.

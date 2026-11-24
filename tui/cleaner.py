@@ -162,7 +162,7 @@ def human(value):
 def old_logs():
     root = Path.home() / ".local/state/devbox-bootstrap"
     cutoff = time.time() - 30 * 86400
-    for folder, suffix in (("logs", ".log"), ("runs", ".events")):
+    for folder, suffix in (("logs", ".log"), ("logs", ".json"), ("runs", ".events")):
         directory = root / folder
         # Never traverse redirected directories, including ancestor symlinks.
         if directory.resolve() != directory or not directory.is_dir():
@@ -321,9 +321,11 @@ def scan_group(group, docker_target=None, *, measure=True):
                     continue
                 category = ("Build Cache" if item.key == "docker-build-cache" else
                             "Local Volumes" if item.key == "docker-volumes" else "Images")
-                estimate = docker.get(category, {}).get("Reclaimable", "unknown") if measure else "not measured"
+                # Engine category reclaimable bytes are not an eligibility estimate.
+                category_estimate = docker.get(category, {}).get("Reclaimable", "unknown")
+                estimate = category_estimate if measure else "not measured"
                 resources = ()
-                note = "Engine daemon inventory; estimates include shared layers and may overlap. Custom Buildx builders are not scanned."
+                note = "Engine category upper estimate only; exact age/tag eligibility and shared-layer reclaim are unknown. Custom Buildx builders are not scanned."
                 if item.key in RESOURCE_KEYS and measure:
                     try:
                         resources = docker_resources(prefix, item.key)
@@ -401,11 +403,13 @@ def select_keys(only, all_safe, available):
     return keys
 
 
-def event(key, state):
+def event(key, state, detail=None):
     path = os.environ.get("DEVBOX_EVENT_FILE")
     if path:
         with open(path, "a", encoding="utf-8") as stream:
             stream.write(f"STATUS\t{key}\t{state}\n")
+            if detail is not None:
+                stream.write(f"DETAIL\t{key}\t{json.dumps(detail)}\n")
 
 
 def native_outcome(result, before=None, after=None, *, docker=True):
@@ -622,7 +626,7 @@ def run_plan(args, parser, keys):
         if key not in available:
             reason = next((row.note for row in rows if row.key == key), "unavailable")
             print(f"Skipped {key}: {reason}")
-            event(key, "SKIPPED")
+            event(key, "SKIPPED", reason)
             outcomes.append((key, Outcome("SKIPPED", reason)))
             failed = True
             continue
@@ -631,7 +635,7 @@ def run_plan(args, parser, keys):
             outcome = execute(BY_KEY[key], target, args.resource) if key in RESOURCE_KEYS else execute(BY_KEY[key], target)
         except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
             outcome = Outcome("FAILED", str(exc))
-        event(key, outcome.state)
+        event(key, outcome.state, outcome.detail)
         outcomes.append((key, outcome))
         failed |= outcome.state in {"FAILED", "SKIPPED"}
     print("\nCLEANUP SUMMARY (per cleaner)")

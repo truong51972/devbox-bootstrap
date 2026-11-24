@@ -4,7 +4,7 @@
 if command -v minikube >/dev/null 2>&1; then
     log 'Minikube already installed; skipping.'
 else
-    if [[ -e /usr/local/bin/minikube || -L /usr/local/bin/minikube ]]; then
+    if binary_destination_exists /usr/local/bin/minikube; then
         die "Refusing to overwrite an existing Minikube binary outside PATH."
         return 1
     fi

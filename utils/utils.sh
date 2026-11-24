@@ -187,3 +187,6 @@ trusted_github_origin() {
         *) return 1 ;;
     esac
 }
+
+# Check destination existence even if PATH does not expose the binary.
+binary_destination_exists() { [[ -e "$1" || -L "$1" ]]; }
