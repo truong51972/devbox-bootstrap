@@ -144,12 +144,12 @@ def old_logs():
                 yield path, stat.st_blocks * 512
 
 
-def scan():
+def scan(docker_target=None):
     rows = []
     docker, docker_error = {}, ""
     if shutil.which("docker"):
         try:
-            docker = docker_df(docker_prefix())
+            docker = docker_df(docker_target if docker_target is not None else docker_prefix())
         except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
             docker_error = str(exc)
     for item in CLEANERS:
@@ -199,7 +199,7 @@ def event(key, state):
             stream.write(f"STATUS\t{key}\t{state}\n")
 
 
-def execute(item):
+def execute(item, docker_target=None):
     if item.key == "devbox-logs":
         # Recheck at execution time. unlink does not follow a file symlink.
         count = 0
@@ -209,7 +209,9 @@ def execute(item):
         print(f"Removed {count} old Devbox log/event files.")
         return True
     if item.tool == "docker":
-        argv = docker_prefix() + list(item.command)
+        if docker_target is None:
+            raise RuntimeError("Docker target was not verified for this run")
+        argv = docker_target + list(item.command)
     elif item.sudo:
         argv = ["sudo", "-n", item.tool, *item.command]
     else:
@@ -238,7 +240,13 @@ def main(argv=None):
         parser.error("--json is for inventory only")
     if os.geteuid() == 0:
         parser.error("Run Devbox as a regular user, not root")
-    rows = scan()
+    target = None
+    if shutil.which("docker"):
+        try:
+            target = docker_prefix()
+        except (OSError, RuntimeError, subprocess.TimeoutExpired):
+            pass
+    rows = scan(target)
     available = {row.key for row in rows if row.available}
     try:
         keys = select_keys(args.only, args.all_safe, available)
@@ -285,7 +293,7 @@ def main(argv=None):
             continue
         event(key, "RUNNING")
         try:
-            ok = execute(BY_KEY[key])
+            ok = execute(BY_KEY[key], target)
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             print(f"{key}: {exc}")
             ok = False

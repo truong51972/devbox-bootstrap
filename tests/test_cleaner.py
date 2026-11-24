@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
-from tui.cleaner import BY_KEY, SAFE_KEYS, select_keys, docker_prefix, main
+from tui.cleaner import BY_KEY, SAFE_KEYS, Scan, select_keys, docker_prefix, main
+from tui.app import DevboxTUI
 from tui.backend import build_command
 from tui.ui import Entry, KeyboardList
 
@@ -38,6 +39,32 @@ class CleanerTests(unittest.TestCase):
     def test_remote_refused(self):
         with self.assertRaises(RuntimeError):
             docker_prefix()
+
+    def test_tui_all_clears_manual_selection(self):
+        app = DevboxTUI()
+        widget = app.cleaner_list
+        widget.entries = [Entry("pip-cache", "pip"), Entry("docker-volumes", "Volumes")]
+        widget.current_values = ["docker-volumes"]
+        bindings = widget.window.content.key_bindings.get_bindings_for_keys(("a",))
+        self.assertTrue(bindings)
+        bindings[-1].handler(None)
+        self.assertEqual(widget.current_values, ["pip-cache"])
+
+    def test_cleaner_progress_uses_cleaner_status_keys(self):
+        app = DevboxTUI()
+        app.status = {"pip-cache": "CLEANED"}
+        self.assertIn("1 / 1 complete", "".join(text for _, text in app._progress_tokens()))
+
+    @patch("tui.cleaner.shutil.which", return_value=None)
+    @patch("tui.cleaner.os.geteuid", return_value=1000)
+    @patch("tui.cleaner.execute", return_value=True)
+    @patch("tui.cleaner.scan", return_value=[
+        Scan("pip-cache", True, "1 MiB", ""),
+        Scan("docker-volumes", True, "1 GiB", ""),
+    ])
+    def test_cli_all_executes_only_safe_items(self, _scan, execute, _uid, _which):
+        self.assertEqual(main(["--all", "--yes"]), 0)
+        execute.assert_called_once_with(BY_KEY["pip-cache"], None)
 
     def test_no_volume_or_tagged_image_in_safe_commands(self):
         for key in SAFE_KEYS:

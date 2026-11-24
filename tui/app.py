@@ -760,7 +760,7 @@ class DevboxTUI:
         return tokens
 
     def _progress_tokens(self):
-        active = [code for code in ORDER if self.status.get(code) != "--"]
+        active = [code for code, state in self.status.items() if state != "--"]
         complete = [
             code for code in active if self.status[code] in FINAL_STATES
         ]
@@ -993,7 +993,8 @@ class DevboxTUI:
                         options.append(Entry("agent_" + agent, "Integrate with " + label))
         self.options = self._make_options(options)
         self._layout_cache.pop("confirm", None)
-        self._notice("Review the plan. Optional changes are OFF by default.")
+        self._notice("Review the plan. Optional changes are OFF by default." if self.action != "clean"
+                     else "Dry-run ON. Press d to enable deletion; manual items require consent.")
         self.navigate("confirm", self.options.window)
 
     def _chosen_agents(self) -> list[str]:
@@ -1005,10 +1006,9 @@ class DevboxTUI:
     def _selection_summary(self) -> str:
         if self.action == "clean":
             mode = "DRY RUN (no deletion)" if self.dry_run else "REAL CLEANUP"
-            return mode + "\n" + "\n".join(
-                ("MANUAL: " if k not in SAFE_KEYS else "SAFE: ") + CLEANER_ITEMS[k].label
-                for k in self.selected
-            ) + "\nPolicy applies to eligible resources at execution. Estimates may overlap."
+            risks = "\n".join(CLEANER_ITEMS[k].description for k in self.selected if k not in SAFE_KEYS)
+            return mode + "\n" + ", ".join(self.selected) + "\n" + risks + (
+                "\nPolicy applies to eligible resources at execution. Estimates may overlap.")
         if self.action == "update":
             return "Update Devbox source\nFast-forward only\nRestart the TUI after updating."
         added = f"\nAuto-added: {', '.join(self.auto_added)}" if self.auto_added else ""
