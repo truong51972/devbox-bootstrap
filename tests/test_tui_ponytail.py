@@ -281,10 +281,10 @@ class PonytailStatusTests(unittest.TestCase):
         }
         async def scenario():
             with patch("tui.app.discover_agents", return_value=discovered.copy()), \
-                 patch("tui.app.probe_agent", side_effect=lambda agent: {
+                 patch("tui.app.probe_agent", side_effect=lambda agent: agent_status.PluginStatus(agent, {
                      "claude": "Installed", "codex": "Installed",
                      "copilot": "Missing",
-                 }[agent]), \
+                 }[agent], "test", "fixture")), \
                  patch("tui.app.installed", return_value=False):
                 app = DevboxTUI()
                 app.open_menu()
