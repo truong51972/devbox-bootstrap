@@ -236,11 +236,15 @@ verify_component() {
             verify_binary "$component" fd fdfind || return 1 ;;
         direnv) verify_binary "$component" direnv || return 1 ;;
         rtk)
-            verify_binary "$component" rtk || return 1
-            local rtk_exe
-            rtk_exe="$(command -v rtk || true)"
-            [[ -n "$rtk_exe" ]] || rtk_exe="$HOME/.local/bin/rtk"
-            "$rtk_exe" gain >/dev/null 2>&1 || { die 'RTK is not rtk-ai Token Killer'; return 1; } ;;
+            local rtk_python="$SCRIPT_DIR/.venv/bin/python"
+            [[ -x "$rtk_python" ]] || rtk_python=python3
+            if ! command -v "$rtk_python" >/dev/null 2>&1; then
+                die 'RTK verification requires Python 3.'; return 1
+            fi
+            if ! "$rtk_python" -m tui.rtk_status --verify "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; then
+                warn 'RTK binary or selected integration could not be verified.'
+                return 1
+            fi ;;
         skills-cli) verify_binary "$component" skills || return 1 ;;
         ponytail)
             local inventory_python="$SCRIPT_DIR/.venv/bin/python"
