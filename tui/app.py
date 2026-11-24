@@ -785,7 +785,7 @@ class DevboxTUI:
                 ]
                 # Allocate only as much space as the actual choices need.
                 self.options.window.height = Dimension(
-                    min=1, preferred=len(self.options.entries), max=len(self.options.entries))
+                    min=1, preferred=min(8, len(self.options.entries) + 2), max=12)
             return HSplit(children)
         return self._layout("confirm", build)
 
@@ -1143,7 +1143,14 @@ class DevboxTUI:
     def _make_confirmation(self) -> None:
         options: list[Entry] = []
         if self.action == "clean" and any(k not in SAFE_KEYS for k in self.selected):
-            options.append(Entry("risk", "I accept permanent loss of manually selected resources"))
+            options.append(Entry("risk", "I accept permanent loss of manually selected resources", "CONSENT"))
+            for key in self.selected:
+                row = self.cleaner_rows.get(key)
+                if key not in {"docker-unused-images", "docker-volumes"} or row is None:
+                    continue
+                for resource in row.resources:
+                    options.append(Entry(resource["token"], resource["label"],
+                                         CLEANER_ITEMS[key].label, resource["size"]))
         if self.action == "install":
             if "zsh" in self.selected:
                 options.append(Entry("change_shell", "Set Zsh as login shell"))
@@ -1199,6 +1206,10 @@ class DevboxTUI:
                 lines.append("Sudo authentication required for selected APT cleanup.")
             if any(k not in SAFE_KEYS for k in self.selected):
                 lines.append("Manual items require explicit consent before deletion.")
+            if any(k in {"docker-unused-images", "docker-volumes"} for k in self.selected):
+                lines.append("Select exact image IDs/volume names in Options; no bulk prune.")
+                chosen_resources = [key for key in self.options.current_values if key.startswith(("image:", "volume:"))]
+                lines.append(f"Individual resources selected: {len(chosen_resources)}")
             return "\n".join(lines)
         labels = dict(COMPONENTS)
         lines = [f"{self.action.title()}: {len(self.selected)} component(s)", mode, ""]
@@ -1239,7 +1250,10 @@ class DevboxTUI:
         try:
             command = build_command(action, chosen, dry_run=self.dry_run,
                                     agents=self._chosen_agents() if action == "install" else [],
-                                    allow_risky=action == "clean" and "risk" in self.options.current_values)
+                                    allow_risky=action == "clean" and "risk" in self.options.current_values,
+                                    resources=[key for key in self.options.current_values if key.startswith(("image:", "volume:"))] if action == "clean" else [],
+                                    docker_endpoint=next((self.cleaner_rows[key].endpoint for key in chosen
+                                        if key in self.cleaner_rows and self.cleaner_rows[key].endpoint), "") if action == "clean" else "")
         except ValueError as exc:
             self._notice(str(exc))
             return

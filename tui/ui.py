@@ -70,6 +70,10 @@ STATUS_STYLES = {
     "UP_TO_DATE": "class:installed",
     "SKIPPED": "class:warning",
     "PLANNED": "class:warning",
+    "NO_RECLAIM": "class:muted",
+    "NOTHING_TO_CLEAN": "class:muted",
+    "COMPLETED": "class:installed",
+    "CLEANED": "class:installed",
 }
 
 

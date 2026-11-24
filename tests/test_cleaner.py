@@ -4,8 +4,8 @@ from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import subprocess
-from tui.cleaner import (BY_KEY, SAFE_KEYS, PROBE_GROUPS, Scan, select_keys, docker_prefix,
-                         main, scan_group, size, pip_cache_command)
+from tui.cleaner import (BY_KEY, SAFE_KEYS, PROBE_GROUPS, Scan, Outcome, select_keys, docker_prefix,
+                         main, scan_group, size, pip_cache_command, native_outcome, validate_resources)
 from tui.app import DevboxTUI
 from tui.backend import build_command
 from tui.ui import Entry, KeyboardList
@@ -27,7 +27,8 @@ class CleanerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_command("clean", ["docker-volumes"])
         self.assertIn("--allow-risky", build_command(
-            "clean", ["docker-volumes"], allow_risky=True))
+            "clean", ["docker-volumes"], allow_risky=True,
+            resources=["volume:example:" + "a" * 64]))
         self.assertNotIn("--yes", build_command("clean", ["docker-volumes"], dry_run=True))
 
     @patch("tui.cleaner.scan", return_value=[])
@@ -62,7 +63,7 @@ class CleanerTests(unittest.TestCase):
 
     @patch("tui.cleaner.shutil.which", return_value=None)
     @patch("tui.cleaner.os.geteuid", return_value=1000)
-    @patch("tui.cleaner.execute", return_value=True)
+    @patch("tui.cleaner.execute", return_value=Outcome("COMPLETED", "unknown"))
     @patch("tui.cleaner.scan", return_value=[
         Scan("pip-cache", True, "1 MiB", ""),
         Scan("docker-volumes", True, "1 GiB", ""),
@@ -149,18 +150,31 @@ class CleanerTests(unittest.TestCase):
     @patch("tui.cleaner.docker_prefix", return_value=["docker", "--host", "unix:///docker.sock"])
     @patch("tui.cleaner.shutil.which", return_value="/bin/docker")
     def test_docker_size_timeout_falls_back_to_daemon_check(self, *_):
-        self.assertTrue(all(row.available and row.estimate == "unknown" for row in scan_group("docker")))
+        with patch("tui.cleaner.docker_resources", return_value=()):
+            self.assertTrue(all(row.available and row.estimate == "unknown" for row in scan_group("docker")))
 
     @patch("tui.cleaner.shutil.which", return_value="/bin/pip")
     @patch("tui.cleaner.checked", side_effect=[RuntimeError("no system pip"), "/home/user/.cache/pip"])
     def test_pip_falls_back_to_working_cli(self, *_):
         self.assertEqual(pip_cache_command(), (["pip3"], "/home/user/.cache/pip"))
 
+    def test_native_zero_is_not_cleaned(self):
+        result = subprocess.CompletedProcess([], 0, "Total reclaimed space: 0B", "")
+        self.assertEqual(native_outcome(result).state, "NO_RECLAIM")
+        self.assertEqual(native_outcome(subprocess.CompletedProcess([], 0, "", "")).state, "COMPLETED")
+
+    def test_manual_resources_cannot_bulk_delete(self):
+        with self.assertRaises(ValueError):
+            build_command("clean", ["docker-volumes"], allow_risky=True)
+        with self.assertRaises(ValueError):
+            validate_resources(["docker-build-cache"], ["volume:example:" + "a" * 64])
+
     def test_no_volume_or_tagged_image_in_safe_commands(self):
         for key in SAFE_KEYS:
             command = BY_KEY[key].command
             self.assertNotIn("--volumes", command)
-            self.assertNotIn("--all", command)
+            if key != "docker-build-cache":
+                self.assertNotIn("--all", command)
             self.assertNotIn("autoremove", command)
 
 

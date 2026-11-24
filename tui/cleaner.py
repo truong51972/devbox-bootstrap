@@ -9,6 +9,8 @@ import argparse
 import asyncio
 from dataclasses import asdict, dataclass
 import json
+import hashlib
+import re
 import os
 from pathlib import Path
 import shutil
@@ -32,17 +34,17 @@ class Cleaner:
 
 CLEANERS = (
     Cleaner("docker-build-cache", "Docker old build cache", "DOCKER", True,
-            "Dangling build cache older than 7 days; future builds may be slower.",
-            "docker", ("builder", "prune", "--force", "--filter", "until=168h")),
-    Cleaner("docker-dangling-images", "Docker old dangling images", "DOCKER", True,
-            "Dangling images older than 7 days; Docker protects container references.",
-            "docker", ("image", "prune", "--force", "--filter", "until=168h")),
+            "All unused Engine builder cache older than 7 days; future builds may be slower.",
+            "docker", ("builder", "prune", "--all", "--force", "--filter", "until=168h")),
+    Cleaner("docker-dangling-images", "Docker dangling images", "DOCKER", True,
+            "All dangling images; Docker protects container references.",
+            "docker", ("image", "prune", "--force")),
     Cleaner("docker-unused-images", "Docker unused tagged images", "DOCKER / MANUAL", False,
-            "Unused images older than 7 days, including tagged local builds; may require rebuilding.",
-            "docker", ("image", "prune", "--all", "--force", "--filter", "until=168h")),
+            "Select individual unused tagged image IDs; no forced removal or bulk prune.",
+            "docker", ()),
     Cleaner("docker-volumes", "Docker unused local volumes", "DOCKER / MANUAL", False,
-            "PERMANENT DATA LOSS: remove unused local volumes, including named volumes. Back up first.",
-            "docker", ("volume", "prune", "--all", "--force", "--filter", "label!=devbox.protect=true")),
+            "PERMANENT DATA LOSS: select individual unused local volumes. Back up first.",
+            "docker", ()),
     Cleaner("pip-cache", "pip download cache", "PACKAGE CACHES", True,
             "Remove cached downloads, not installed packages.",
             "python3", ("-m", "pip", "cache", "purge")),
@@ -55,6 +57,9 @@ CLEANERS = (
     Cleaner("uv-cache", "uv unused cache", "PACKAGE CACHES / MANUAL", False,
             "Prune unused uv cache entries; symlink-mode environments can depend on cache files.",
             "uv", ("cache", "prune")),
+    Cleaner("uv-cache-clean", "uv full cache", "PACKAGE CACHES / MANUAL", False,
+            "Clear all uv cache entries; may break symlink-mode environments.",
+            "uv", ("cache", "clean")),
     Cleaner("devbox-logs", "Devbox logs older than 30 days", "DEVBOX / MANUAL", False,
             "Delete old Devbox run logs and event files only; history older than 30 days is lost.",
             "", ()),
@@ -62,6 +67,7 @@ CLEANERS = (
 BY_KEY = {item.key: item for item in CLEANERS}
 ORDER = tuple(BY_KEY)
 SAFE_KEYS = frozenset(item.key for item in CLEANERS if item.safe)
+RESOURCE_KEYS = {"docker-unused-images": "image", "docker-volumes": "volume"}
 
 
 @dataclass(frozen=True)
@@ -70,6 +76,14 @@ class Scan:
     available: bool
     estimate: str
     note: str
+    resources: tuple = ()
+    endpoint: str = ""
+
+
+@dataclass(frozen=True)
+class Outcome:
+    state: str
+    detail: str
 
 
 def command_env(argv):
@@ -116,18 +130,23 @@ def docker_df(prefix):
     return {row["Type"]: row for row in (json.loads(line) for line in output.splitlines())}
 
 
-def size(path):
+def size_bytes(path):
     path = Path(path)
     if not path.is_absolute() or path.is_symlink() or not path.is_dir():
-        return "unknown"
+        return None
     try:
         result = run(["du", "-sx", "--block-size=1", "--", str(path)])
         if result.returncode:
-            return "unknown"
-        return human(int(result.stdout.split()[0]))
+            return None
+        return int(result.stdout.split()[0])
     except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
         # Failure to measure a verified cache must not make it unavailable.
-        return "unknown"
+        return None
+
+
+def size(path):
+    value = size_bytes(path)
+    return human(value) if value is not None else "unknown"
 
 
 def human(value):
@@ -156,7 +175,7 @@ PROBE_GROUPS = {
     **{item.key: (item.key,) for item in CLEANERS if item.tool != "docker"},
 }
 PROBE_CONCURRENCY = 4
-PROBE_TIMEOUT = 30
+PROBE_TIMEOUT = 50  # Docker also inventories individual manual resources.
 
 
 def pip_cache_command():
@@ -172,6 +191,71 @@ def pip_cache_command():
         except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
             continue
     raise RuntimeError("No working pip cache command (python3 -m pip, pip3, pip)")
+
+
+def json_lines(prefix, args):
+    return [json.loads(line) for line in checked(prefix + args, timeout=5).splitlines()]
+
+
+def volume_token(prefix, row):
+    # Bind a name to its inspected identity and endpoint; do not delete a
+    # recreated volume with the same name. Native rm also checks references.
+    stamp = hashlib.sha256(json.dumps(
+        [prefix[-1], row], sort_keys=True, separators=(",", ":")
+    ).encode()).hexdigest()
+    return "volume:" + row["Name"] + ":" + stamp
+
+
+def docker_resources(prefix, key):
+    if key == "docker-unused-images":
+        containers = checked(prefix + ["container", "ls", "-aq"], timeout=4).splitlines()
+        used = set()
+        if containers:
+            used = set(checked(prefix + ["container", "inspect", "--format", "{{.Image}}",
+                                         *containers], timeout=5).splitlines())
+        images = json_lines(prefix, ["image", "ls", "--no-trunc", "--filter", "dangling=false",
+                                     "--format", "{{json .}}"])
+        by_id = {}
+        for row in images:
+            ident = row["ID"]
+            if not re.fullmatch(r"sha256:[a-f0-9]{64}", ident) or ident in used:
+                continue
+            label = row["Repository"] + ":" + row["Tag"]
+            if "<none>" in label:
+                continue
+            if ident in by_id:
+                by_id[ident]["label"] += ", " + label
+            else:
+                by_id[ident] = {"token": "image:" + ident, "label": label,
+                                "size": row.get("Size", "unknown")}
+        return tuple(by_id.values())
+    names = checked(prefix + ["volume", "ls", "--filter", "dangling=true",
+                              "--format", "{{.Name}}"], timeout=4).splitlines()
+    if not names:
+        return ()
+    volumes = json.loads(checked(prefix + ["volume", "inspect", *names], timeout=5))
+    return tuple({"token": volume_token(prefix, row), "label": row["Name"],
+                  "size": "unknown"} for row in volumes
+                 if row.get("Driver") == "local" and row.get("CreatedAt")
+                 and (row.get("Labels") or {}).get("devbox.protect") != "true"
+                 and not row.get("Options"))
+
+
+def resource_kind(token):
+    if re.fullmatch(r"image:sha256:[a-f0-9]{64}", token):
+        return "image"
+    if re.fullmatch(r"volume:[a-zA-Z0-9][a-zA-Z0-9_.-]*:[a-f0-9]{64}", token):
+        return "volume"
+    raise ValueError("Invalid resource token")
+
+
+def validate_resources(keys, resources, *, required=True):
+    kinds = [resource_kind(token) for token in resources]
+    expected = {RESOURCE_KEYS[key] for key in keys if key in RESOURCE_KEYS}
+    if len(set(resources)) != len(resources) or set(kinds) - expected:
+        raise ValueError("Duplicate resource or resource does not match selected cleaner")
+    if required and expected - set(kinds):
+        raise ValueError("Select individual image/volume resources; bulk removal is disabled")
 
 
 def scan_group(group, docker_target=None, *, measure=True):
@@ -209,8 +293,15 @@ def scan_group(group, docker_target=None, *, measure=True):
                 category = ("Build Cache" if item.key == "docker-build-cache" else
                             "Local Volumes" if item.key == "docker-volumes" else "Images")
                 estimate = docker.get(category, {}).get("Reclaimable", "unknown") if measure else "not measured"
-                rows.append(Scan(item.key, True, estimate,
-                                 "Docker category total; age filters and shared layers reduce actual reclaim."))
+                resources = ()
+                note = "Engine daemon inventory; estimates include shared layers and may overlap. Custom Buildx builders are not scanned."
+                if item.key in RESOURCE_KEYS and measure:
+                    try:
+                        resources = docker_resources(prefix, item.key)
+                        note += f" {len(resources)} individually eligible resources."
+                    except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
+                        note += f" Resource inventory unavailable: {exc}"
+                rows.append(Scan(item.key, True, estimate, note, resources, prefix[-1]))
                 continue
             if item.key == "devbox-logs":
                 estimate = human(sum(n for _, n in old_logs())) if measure else "not measured"
@@ -218,6 +309,7 @@ def scan_group(group, docker_target=None, *, measure=True):
                 commands = {
                         "npm-cache": ["npm", "config", "get", "cache"],
                     "uv-cache": ["uv", "cache", "dir"],
+                    "uv-cache-clean": ["uv", "cache", "dir"],
                 }
                 if key == "pip-cache":
                     _, path = pip_cache_command()
@@ -278,18 +370,69 @@ def event(key, state):
             stream.write(f"STATUS\t{key}\t{state}\n")
 
 
-def execute(item, docker_target=None):
+def native_outcome(result, before=None, after=None):
+    if result.returncode:
+        return Outcome("FAILED", f"exit {result.returncode}")
+    # Docker reports actual reclaimed storage, not total cache-record size.
+    match = re.search(r"(?:Total reclaimed space|Total):\s*([\d.]+)\s*([kKMGT]?B)\b",
+                      result.stdout + "\n" + result.stderr)
+    if match:
+        value = float(match.group(1))
+        return Outcome("CLEANED" if value > 0 else "NO_RECLAIM",
+                       f"Docker reported {match.group(1)} {match.group(2)}")
+    if before is not None and after is not None:
+        delta = before - after
+        return Outcome("CLEANED" if delta > 0 else "NO_RECLAIM",
+                       f"cache footprint change: {human(delta)} (not guaranteed disk reclaim)")
+    return Outcome("COMPLETED", "command succeeded; reclaimed bytes unknown")
+
+
+def cache_path(item):
+    if item.key == "pip-cache":
+        return pip_cache_command()[1]
+    if item.key == "apt-cache":
+        return "/var/cache/apt/archives"
+    if item.key == "npm-cache":
+        return checked(["npm", "config", "get", "cache"])
+    if item.key.startswith("uv-cache"):
+        return checked(["uv", "cache", "dir"])
+    return None
+
+
+def execute(item, docker_target=None, resources=()):
     if item.key == "devbox-logs":
-        # Recheck at execution time. unlink does not follow a file symlink.
         count = 0
         for path, _ in old_logs():
             path.unlink()
             count += 1
-        print(f"Removed {count} old Devbox log/event files.")
-        return True
+        return Outcome("CLEANED" if count else "NOTHING_TO_CLEAN",
+                       f"removed {count} old log/event files; disk bytes unknown")
     if item.tool == "docker":
         if docker_target is None:
             raise RuntimeError("Docker target was not verified for this run")
+        if item.key in RESOURCE_KEYS:
+            kind = RESOURCE_KEYS[item.key]
+            tokens = [token for token in resources if resource_kind(token) == kind]
+            if not tokens:
+                raise RuntimeError("Explicit resource selection required")
+            # Fresh inventory verifies protection, references and volume identity.
+            current = {row["token"] for row in docker_resources(docker_target, item.key)}
+            removed, skipped, failed = 0, 0, 0
+            for token in tokens:
+                if token not in current:
+                    print(f"Skipped changed or in-use resource: {token}")
+                    skipped += 1
+                    continue
+                target = token.removeprefix("image:") if kind == "image" else token.split(":")[1]
+                argv = docker_target + [kind, "rm", target]
+                result = run(argv, timeout=900)
+                print(result.stdout + result.stderr, flush=True)
+                if result.returncode:
+                    failed += 1
+                else:
+                    removed += 1
+            return Outcome("FAILED" if failed else "SKIPPED" if skipped else "CLEANED",
+                           f"{removed} removed, {skipped} skipped, {failed} failed; disk bytes unknown")
         argv = docker_target + list(item.command)
     elif item.key == "pip-cache":
         prefix, _ = pip_cache_command()
@@ -298,8 +441,13 @@ def execute(item, docker_target=None):
         argv = ["sudo", "-n", item.tool, *item.command]
     else:
         argv = [item.tool, *item.command]
+    path = cache_path(item)
+    before = size_bytes(path) if path else None
     print("+ " + " ".join(argv), flush=True)
-    return subprocess.run(argv, stdin=subprocess.DEVNULL, timeout=900, env=command_env(argv)).returncode == 0
+    result = run(argv, timeout=900)
+    print(result.stdout + result.stderr, flush=True)
+    after = size_bytes(path) if path else None
+    return native_outcome(result, before, after)
 
 
 def main(argv=None):
@@ -312,14 +460,18 @@ def main(argv=None):
     parser.add_argument("--scan", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--resource", action="append", default=[], help="exact resource token from inventory (repeatable)")
+    parser.add_argument("--docker-endpoint", help="require the local endpoint shown in inventory")
     parser.add_argument("--yes", action="store_true", help="explicitly execute the selected policy")
     parser.add_argument("--allow-risky", action="store_true", help="acknowledge manually selected risky cleaners")
     args = parser.parse_args(argv)
     if args.probe_group:
-        if args.only or args.all_safe or args.yes or args.allow_risky or args.json or args.scan or args.dry_run:
+        if args.only or args.all_safe or args.yes or args.allow_risky or args.json or args.scan or args.dry_run or args.resource or args.docker_endpoint:
             parser.error("Internal inventory probe cannot be combined with cleanup arguments")
         print(json.dumps([asdict(row) for row in scan_group(args.probe_group)]))
         return 0
+    if args.resource and not args.only:
+        parser.error("--resource requires explicit --only")
     if args.allow_risky and (not args.only or args.all_safe):
         parser.error("--allow-risky requires explicit --only")
     if args.yes and (args.scan or args.json or args.dry_run or not (args.only or args.all_safe)):
@@ -336,7 +488,13 @@ def main(argv=None):
             parser.error(str(exc))
         if args.yes and any(key not in SAFE_KEYS for key in keys) and not args.allow_risky:
             parser.error("Risky cleaners require explicit --only and --allow-risky")
+        try:
+            validate_resources(keys, args.resource, required=args.yes)
+        except ValueError as exc:
+            parser.error(str(exc))
         if not args.yes:
+            for token in args.resource:
+                print(f"Selected resource: {token}")
             for key in keys:
                 print(f"{key}: {BY_KEY[key].description}")
                 event(key, "PLANNED")
@@ -349,6 +507,8 @@ def main(argv=None):
             target = docker_prefix()
         except (OSError, RuntimeError, subprocess.TimeoutExpired):
             pass
+    if args.docker_endpoint and (target is None or target[-1] != args.docker_endpoint):
+        parser.error("Docker endpoint changed since selection; rescan required")
     rows = scan(target, keys=requested, measure=not args.yes)
     available = {row.key for row in rows if row.available}
     try:
@@ -363,6 +523,8 @@ def main(argv=None):
             item = BY_KEY[row.key]
             print(f"{row.key:25} {'SAFE' if item.safe else 'MANUAL':7} "
                   f"{row.estimate:20} {row.note}")
+            for resource in row.resources:
+                print(f"  {resource['label']}  {resource['size']}  {resource['token']}")
         print("No changes. Use --all or --only to preview; add --yes to execute.")
         return 0
     if any(key not in SAFE_KEYS for key in keys) and args.yes and not args.allow_risky:
@@ -392,25 +554,32 @@ def main(argv=None):
     locations = list({p.stat().st_dev: p for p in locations}.values())
     before = {p: shutil.disk_usage(p).free for p in locations}
     failed = False
+    outcomes = []
     for key in keys:
         if key not in available:
             reason = next((row.note for row in rows if row.key == key), "unavailable")
             print(f"Skipped {key}: {reason}")
             event(key, "SKIPPED")
+            outcomes.append((key, Outcome("SKIPPED", reason)))
             failed = True
             continue
         event(key, "RUNNING")
         try:
-            ok = execute(BY_KEY[key], target)
-        except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
-            print(f"{key}: {exc}")
-            ok = False
-        event(key, "CLEANED" if ok else "FAILED")
-        failed |= not ok
+            outcome = execute(BY_KEY[key], target, args.resource) if key in RESOURCE_KEYS else execute(BY_KEY[key], target)
+        except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
+            outcome = Outcome("FAILED", str(exc))
+        event(key, outcome.state)
+        outcomes.append((key, outcome))
+        failed |= outcome.state in {"FAILED", "SKIPPED"}
+    print("\nCLEANUP SUMMARY (per cleaner)")
+    for key, outcome in outcomes:
+        print(f"{key}: {outcome.state} — {outcome.detail}")
     for path in locations:
         delta = shutil.disk_usage(path).free - before[path]
         print(f"Observed free-space change ({path}): {human(delta)}")
-    print("WSL: Linux free space may not shrink the Windows VHDX automatically.")
+    if "microsoft" in os.uname().release.lower():
+        print("WSL: Linux free space may not shrink the Windows VHDX automatically.")
+        print("Check the Windows VHDX size separately. Stop WSL and follow Microsoft disk-compaction guidance manually; Devbox never shuts down WSL or compacts disks.")
     return int(failed)
 
 
