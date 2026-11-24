@@ -56,7 +56,7 @@ class DevboxViews:
             return [("class:header", value)]
 
         def notice_text():
-            return [("class:statusbar", self._truncate(
+            return [(self.message_style, self._truncate(
                 "  " + self.message, max(0, self.columns() - 1)
             ))]
 
@@ -190,7 +190,7 @@ class DevboxViews:
         requires_consent = (self.action == "clean" and bool(self.options.entries)
                             and "risk" not in self.options.current_values and not preview)
         return [
-            ("class:warning" if preview or requires_consent else "class:title",
+            ("class:warning" if preview or requires_consent else "class:running",
              "  DRY RUN — no changes\n" if preview else
              "  MANUAL CLEANUP — consent required\n" if requires_consent else
              "  APPLY CHANGES — Enter to confirm\n"),
