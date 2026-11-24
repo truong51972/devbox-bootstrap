@@ -15,7 +15,9 @@ from prompt_toolkit.layout.mouse_handlers import MouseHandlers
 from prompt_toolkit.layout.screen import Screen, WritePosition
 from prompt_toolkit.output import DummyOutput
 
-from tui.app import DETAIL_PANEL_WIDTH, DevboxTUI
+from tui.app import DevboxTUI
+from tui.views import detail_panel_width, SPLIT_SPACING
+from prompt_toolkit.layout.dimension import to_dimension
 from tui.catalog import ORDER
 from tui.ui import Entry, KeyboardList
 
@@ -32,8 +34,8 @@ class LayoutTests(unittest.TestCase):
         self.assertIsInstance(app._home_layout(), VSplit)
         self.assertIsInstance(app._logs_layout(), VSplit)
 
-    def test_right_panel_width_is_fixed_across_selection_changes(self):
-        # All wide screens should reserve the same number of columns for details.
+    def test_right_panel_width_is_balanced_across_selection_changes(self):
+        # All wide screens reserve half of the available columns for details.
         # A longer description or log path must wrap, not move the divider.
         app = DevboxTUI()
         app.columns = lambda: 120
@@ -50,8 +52,9 @@ class LayoutTests(unittest.TestCase):
                 panel = layout.children[-1]
                 self.assertIsInstance(panel, Window)
                 self.assertEqual(
-                    (panel.width.min, panel.width.preferred, panel.width.max),
-                    (DETAIL_PANEL_WIDTH,) * 3,
+                    (to_dimension(panel.width).min, to_dimension(panel.width).preferred,
+                     to_dimension(panel.width).max),
+                    (59,) * 3,
                 )
                 self.assertTrue(panel.wrap_lines())
                 self.assertEqual(layout.padding, 1)
@@ -62,14 +65,14 @@ class LayoutTests(unittest.TestCase):
                     widget.move(1)
                     self.assertIs(layout_getter(), layout)
                     self.assertIs(layout.children[-1], panel)
-                    self.assertEqual(panel.width.preferred, DETAIL_PANEL_WIDTH)
+                    self.assertEqual(to_dimension(panel.width).preferred, 59)
 
     def test_wide_separator_does_not_shift_on_cursor_navigation(self):
         # Exercise prompt_toolkit's actual column allocator, not only the
         # declared Window dimension. Long details must never move the divider.
         app = DevboxTUI()
         app.open_menu()
-        for columns in (94, 120):
+        for columns in (94, 95, 120, 160, 200):
             app.columns = lambda c=columns: c
             app.rows = lambda: 35
             layout = app._selection_layout()
@@ -95,10 +98,34 @@ class LayoutTests(unittest.TestCase):
                 self.assertEqual(len(set(divider_positions)), 1)
                 self.assertEqual(
                     divider_positions[0],
-                    columns - DETAIL_PANEL_WIDTH - 2,
+                    columns - detail_panel_width(columns) - 2,
                 )
 
-    def test_fixed_panel_preserves_responsive_breakpoints(self):
+    def test_all_wide_panes_resize_without_rebuilding(self):
+        app = DevboxTUI()
+        app.columns = lambda: 120
+        app.rows = lambda: 35
+        layouts = [
+            (app._home_layout, app.menu, lambda layout: layout),
+            (app._selection_layout, app.selector, lambda layout: layout),
+            (app._logs_layout, app.log_files, lambda layout: layout),
+            (app._cleaner_layout, app.cleaner_list, lambda layout: layout.children[-1]),
+        ]
+        for getter, widget, split_of in layouts:
+            app.columns = lambda: 120
+            layout = getter()
+            split = split_of(layout)
+            panel = split.children[-1]
+            for columns, expected_right in ((94, 46), (95, 46), (120, 59), (161, 79), (200, 99)):
+                with self.subTest(view=getter.__name__, columns=columns):
+                    app.columns = lambda c=columns: c
+                    self.assertIs(getter(), layout)
+                    self.assertIs(split_of(layout).children[-1], panel)
+                    self.assertEqual(to_dimension(panel.width).preferred, expected_right)
+                    self.assertEqual(widget.get_columns(), columns - expected_right - SPLIT_SPACING)
+                    self.assertLessEqual(abs(widget.get_columns() - expected_right), 1)
+
+    def test_balanced_panel_preserves_responsive_breakpoints(self):
         app = DevboxTUI()
         for columns, rows, selection_type, home_type, logs_type in (
             (94, 35, VSplit, VSplit, VSplit),
@@ -131,7 +158,7 @@ class LayoutTests(unittest.TestCase):
         app = DevboxTUI()
         app.columns = lambda: 120
         app.open_menu()
-        self.assertEqual(app.selector.get_columns(), 120 - DETAIL_PANEL_WIDTH - 3)
+        self.assertEqual(app.selector.get_columns(), 58)
         # Every displayed state begins at the same column, including focused
         # rows and entries with widely differing label lengths.
         rows = "".join(text for _, text in app.selector.render()).splitlines()

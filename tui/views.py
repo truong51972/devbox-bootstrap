@@ -6,7 +6,13 @@ from prompt_toolkit.layout import HSplit, VSplit, DynamicContainer, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 
-DETAIL_PANEL_WIDTH = 42
+WIDE_LAYOUT_MIN = 94
+SPLIT_SPACING = 3  # One divider column and two VSplit padding columns.
+
+
+def detail_panel_width(columns: int) -> int:
+    """Reserve half of the available split width, rounded toward details."""
+    return max(1, (columns - SPLIT_SPACING + 1) // 2)
 
 
 class DevboxViews:
@@ -135,10 +141,10 @@ class DevboxViews:
         return Window(char="│", width=1, style="class:divider")
 
     def _home_layout(self):
-        if self.columns() >= 94:
+        if self.columns() >= WIDE_LAYOUT_MIN:
             return self._layout("home-wide", lambda: VSplit([
                 self.menu.window, self._divider_v(),
-                self._text(self._home_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
+                self._text(self._home_details, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
             ], padding=1))
         if self.rows() >= 26:
             return self._layout("home-medium", lambda: HSplit([
@@ -148,10 +154,10 @@ class DevboxViews:
         return self.menu.window
 
     def _selection_layout(self):
-        if self.columns() >= 94:
+        if self.columns() >= WIDE_LAYOUT_MIN:
             return self._layout("select-wide", lambda: VSplit([
                 self.selector.window, self._divider_v(),
-                self._text(self._component_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
+                self._text(self._component_details, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
             ], padding=1))
         if self.rows() >= 25 and self.columns() >= 64:
             return self._layout("select-medium", lambda: HSplit([
@@ -232,20 +238,20 @@ class DevboxViews:
         ]))
 
     def _logs_layout(self):
-        if self.columns() >= 94:
+        if self.columns() >= WIDE_LAYOUT_MIN:
             return self._layout("logs-wide", lambda: VSplit([
                 self.log_files.window, self._divider_v(),
-                self._text(self._history_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
+                self._text(self._history_details, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
             ], padding=1))
         return self.log_files.window
 
     def _cleaner_layout(self):
         summary = lambda: self._text(self._cleaner_summary, height=2)
-        if self.columns() >= 94:
+        if self.columns() >= WIDE_LAYOUT_MIN:
             return self._layout("cleaner-wide", lambda: HSplit([
                 summary(), self._divider(), VSplit([
                     self.cleaner_list.window, self._divider_v(),
-                    self._text(self._cleaner_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
+                    self._text(self._cleaner_details, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
                 ], padding=1),
             ]))
         if self.rows() >= 25 and self.columns() >= 64:
