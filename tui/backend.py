@@ -13,7 +13,7 @@ STATE_ROOT = Path.home() / ".local/state/devbox-bootstrap"
 FINAL_STATES = {"INSTALLED", "CONFIGURED", "UPDATED", "UP_TO_DATE", "SKIPPED", "FAILED", "PLANNED", "NOT_RUN", "CLEANED", "NO_RECLAIM", "NOTHING_TO_CLEAN", "COMPLETED"}
 
 
-AGENTS = ("claude", "codex", "copilot", "opencode", "gemini")
+from tui.agent_status import AGENTS
 
 
 def build_command(action: str, selected: list[str], *, dry_run: bool = False,

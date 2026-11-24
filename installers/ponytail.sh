@@ -32,6 +32,8 @@ for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
             opencode plugin add @dietrichgebert/ponytail ;;
         gemini)
             gemini extensions install https://github.com/DietrichGebert/ponytail ;;
+        agy)
+            agy plugin install https://github.com/DietrichGebert/ponytail ;;
         *) die "Unsupported Ponytail agent: $agent"; return 1 ;;
     esac
     # Receipt, not an authoritative inspection of the agent's plugin state.

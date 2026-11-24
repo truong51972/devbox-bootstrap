@@ -19,13 +19,14 @@ except ImportError:  # Python 3.10 (Ubuntu 22.04)
     except ImportError:
         tomllib = None
 
-AGENTS = ("claude", "codex", "copilot", "opencode", "gemini")
+AGENTS = ("claude", "codex", "copilot", "opencode", "gemini", "agy")
 LABELS = {
     "claude": "Claude Code",
     "codex": "Codex",
     "copilot": "Copilot CLI",
     "opencode": "OpenCode",
     "gemini": "Gemini CLI",
+    "agy": "Antigravity CLI",
 }
 _COMMANDS = {
     "claude": ("claude", "plugin", "list", "--json"),
@@ -33,6 +34,7 @@ _COMMANDS = {
     "copilot": ("copilot", "plugin", "list", "--json"),
     "opencode": ("opencode", "plugin", "list"),
     "gemini": ("gemini", "extensions", "list"),
+    "agy": ("agy", "plugin", "list", "--json"),
 }
 _TIMEOUT = 6
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -294,7 +296,7 @@ def probe_agent_detail(agent: str) -> PluginStatus:
                                     "Copilot CLI not installed")
             reason = f"Inventory exit {result.returncode}" + (f": {detail}" if detail else "")
             break
-        state = (_from_json(agent, result.stdout) if agent in ("claude", "codex", "copilot")
+        state = (_from_json(agent, result.stdout) if agent in ("claude", "codex", "copilot", "agy")
                  else _from_text(result.stdout, gemini=agent == "gemini"))
         if agent == "codex" and command != _COMMANDS[agent] and state == "Missing":
             reason = "Full inventory timed out; Ponytail marketplace has no match"

@@ -191,6 +191,19 @@ class PonytailStatusTests(unittest.TestCase):
             self.assertEqual(result.state, "Installed")
             self.assertEqual(result.source, "local config")
 
+    def test_agy_plugin_inventory(self):
+        for enabled, expected in ((True, "Installed"), (False, "Disabled")):
+            with self.subTest(enabled=enabled), \
+                 patch("tui.agent_status.shutil.which", return_value="/bin/agy"), \
+                 patch("tui.agent_status.subprocess.run", return_value=SimpleNamespace(
+                     returncode=0, stdout=json.dumps([{"name": "ponytail", "enabled": enabled}])
+                 )) as run:
+                result = agent_status.probe_agent_detail("agy")
+                self.assertEqual(result.state, expected)
+                self.assertEqual(run.call_args.args[0], ("agy", "plugin", "list", "--json"))
+        self.assertEqual(agent_status._from_json("agy", "[]"), "Missing")
+        self.assertEqual(agent_status._from_json("agy", '{"error":"unsupported"}'), "Unverified")
+
     def test_discovery_lists_all_agents_without_receipts(self):
         detected = {"claude", "codex", "opencode"}
         with patch("tui.agent_status.shutil.which",
@@ -201,6 +214,7 @@ class PonytailStatusTests(unittest.TestCase):
         self.assertEqual(statuses["codex"], "Checking")
         self.assertEqual(statuses["opencode"], "Checking")
         self.assertEqual(statuses["gemini"], "Unavailable")
+        self.assertEqual(statuses["agy"], "Unavailable")
         self.assertEqual(statuses["copilot"], "Unavailable")
 
     def test_failed_or_unsupported_queries_never_claim_missing(self):

@@ -175,7 +175,7 @@ skills check
 ```
 
 Supported target identifiers: `claude`, `codex`, `copilot`, `opencode`,
-`gemini`. The TUI only offers targets whose CLI is discoverable in the
+`gemini`, `agy` (Antigravity CLI). The TUI only offers targets whose CLI is discoverable in the
 current environment. `--agents` requires an RTK or Ponytail install; Ponytail
 requires at least one selected target. With both selected, the same target
 set is applied to both. RTK **without** targets installs only the binary.
@@ -191,6 +191,8 @@ an unrelated `rtk` package. Skills CLI is installed through npm under
 `~/.local` (without sudo). Ponytail uses the agent's official marketplace
 or extension commands; those can execute upstream lifecycle hooks. Review
 the upstream repository and plugin permissions before installing.
+
+For Antigravity CLI (`agy`), Devbox uses `rtk init -g --agent antigravity` and `agy plugin install https://github.com/DietrichGebert/ponytail`. A recent RTK release with global Antigravity plugin support and an AGY version supporting `plugin list --json` are required. Gemini CLI remains a separate target.
 
 **Activation and maintenance:** Restart the targeted agents afterward. In
 Codex, open `/hooks`, review and trust Ponytail's lifecycle hooks yourself.
