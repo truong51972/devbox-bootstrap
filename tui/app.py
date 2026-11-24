@@ -100,6 +100,7 @@ AGENT_EXECUTABLES = (
     ("copilot", "Copilot CLI", "copilot"),
     ("opencode", "OpenCode", "opencode"),
     ("gemini", "Gemini CLI", "gemini"),
+    ("agy", "Antigravity CLI", "agy"),
 )
 @lru_cache(maxsize=64)
 def _cached_log_tail(path: str, size: int, modified_ns: int) -> str:
@@ -766,7 +767,7 @@ class DevboxTUI(DevboxViews):
                 detail = details.get(agent)
                 suffix = " (rules)" if detail and detail.source == "instructions" else ""
                 out.extend([
-                    ("class:body", f"  {LABELS[agent]:<13} "),
+                    ("class:body", f"  {LABELS[agent]:<15} "),
                     (STATUS_STYLES.get(state, "class:body"), state + suffix + "\n"),
                 ])
                 if detail and (full or state == "Unverified"):
