@@ -4,7 +4,6 @@ from __future__ import annotations
 import socket
 import ssl
 from urllib.parse import urlsplit
-import http.client
 
 from .native import native
 
@@ -17,7 +16,7 @@ def port_number(value):
 
 def endpoint(value, default_port=None):
     parsed = urlsplit("//" + value)
-    if not parsed.hostname or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+    if not parsed.hostname or parsed.hostname.startswith("-") or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
         raise ValueError("Enter host:port (IPv6 in brackets).")
     port = parsed.port or default_port
     if not port or not 1 <= port <= 65535:
@@ -44,13 +43,13 @@ def routes(_value, _cwd):
 def dns(value, _cwd):
     if not value or value.startswith("-") or any(c.isspace() for c in value):
         raise ValueError("Enter a hostname without spaces.")
-    return native(["getent", "ahosts", value])
+    return native(["getent", "--", "ahosts", value])
 
 
 def tcp(value, _cwd):
     host, port = endpoint(value)
     # Bound DNS resolution through a native command as well as the connect.
-    resolved = native(["getent", "ahosts", host], timeout=5).splitlines()
+    resolved = native(["getent", "--", "ahosts", host], timeout=5).splitlines()
     for line in resolved[:8]:
         addr = line.split()[0]
         try:
@@ -74,7 +73,7 @@ def http(value, _cwd):
 
 def tls(value, _cwd):
     host, port = endpoint(value, 443)
-    resolved = native(["getent", "ahosts", host], timeout=5).splitlines()
+    resolved = native(["getent", "--", "ahosts", host], timeout=5).splitlines()
     addr = resolved[0].split()[0]
     with socket.create_connection((addr, port), timeout=4) as raw:
         with ssl.create_default_context().wrap_socket(raw, server_hostname=host) as conn:

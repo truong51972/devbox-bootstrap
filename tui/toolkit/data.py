@@ -25,7 +25,7 @@ def b64encode(value, _cwd):
 
 
 def b64decode(value, _cwd):
-    return base64.b64decode(value, validate=True).decode("utf-8")
+    return base64.b64decode(value.strip(), validate=True).decode("utf-8")
 
 
 def url_encode(value, _cwd):

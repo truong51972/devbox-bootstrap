@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from . import agents, data, network, system
+from . import agents, data, network, system, environment
 
 @dataclass(frozen=True)
 class Action:
@@ -20,6 +20,8 @@ class Action:
 
 
 ACTIONS = (
+    Action("env.list", "Development tool inventory", "Environment", environment.tools, "Inspect detected tools and ownership evidence."),
+    Action("env.profile", "Preview desired-state profile", "Environment", environment.profile_plan, "Review a JSON profile without applying changes.", "Profile file", True),
     Action("net.ports", "Listening ports", "Networking", network.ports, "List local TCP/UDP listeners."),
     Action("net.port", "Find process by port", "Networking", network.port, "Inspect listeners on an exact port.", "Port", True),
     Action("net.ip", "Local IP addresses", "Networking", network.addresses, "Show interface addresses."),
