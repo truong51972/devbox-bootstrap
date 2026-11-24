@@ -269,7 +269,7 @@ class PonytailStatusTests(unittest.TestCase):
         async def scenario():
             with patch("tui.app.discover_agents", side_effect=lambda: detected.copy()), \
                  patch("tui.app.probe_agent", side_effect=slow_probe), \
-                 patch("tui.app.installed", return_value=False):
+                 patch("tui.app.inspect_rtk", return_value=__import__("tui.rtk_status", fromlist=["RtkInventory"]).RtkInventory(agent_status.PluginStatus("rtk", "Missing", "test", "fixture"), {})):
                 app = DevboxTUI()
                 start = time.monotonic()
                 app.open_menu()
@@ -317,7 +317,7 @@ class PonytailStatusTests(unittest.TestCase):
             with patch("tui.app.discover_agents",
                        side_effect=lambda: detected.copy()), \
                  patch("tui.app.probe_agent", side_effect=delayed_agent), \
-                 patch("tui.app.installed", return_value=False):
+                 patch("tui.app.inspect_rtk", return_value=__import__("tui.rtk_status", fromlist=["RtkInventory"]).RtkInventory(agent_status.PluginStatus("rtk", "Missing", "test", "fixture"), {})):
                 app = DevboxTUI()
                 app.open_menu()
                 await asyncio.sleep(0.025)
@@ -345,7 +345,7 @@ class PonytailStatusTests(unittest.TestCase):
                      "claude": "Installed", "codex": "Installed",
                      "copilot": "Missing",
                  }[agent], "test", "fixture")), \
-                 patch("tui.app.installed", return_value=False):
+                 patch("tui.app.inspect_rtk", return_value=__import__("tui.rtk_status", fromlist=["RtkInventory"]).RtkInventory(agent_status.PluginStatus("rtk", "Missing", "test", "fixture"), {})):
                 app = DevboxTUI()
                 app.open_menu()
                 await asyncio.wait_for(app._agent_scan_task, timeout=2)
