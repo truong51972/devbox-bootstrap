@@ -177,7 +177,10 @@ class LayoutTests(unittest.TestCase):
         app.open_menu()
         app.selector.current_values = ["uv", "rtk"]
         app.selector.set_query("rtk")
-        details = "".join(text for _, text in app._component_details())
+        preview = "".join(text for _, text in app._component_details())
+        self.assertIn("AGENT INTEGRATIONS", preview)
+        self.assertNotIn("QUICK ACTIONS", preview)
+        details = "".join(text for _, text in app._component_details(full=True))
         self.assertIn("OVERVIEW", details)
         self.assertIn("DESCRIPTION", details)
         self.assertIn("INVENTORY", details)

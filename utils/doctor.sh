@@ -110,31 +110,19 @@ doctor_main() {
     fi
     doctor_bin Minikube minikube
 
-    local rtk_exe=''
-    rtk_exe="$(command -v rtk || true)"
-    if [[ -z "$rtk_exe" && -x "$HOME/.local/bin/rtk" ]]; then
-        rtk_exe="$HOME/.local/bin/rtk"
-    fi
-    if [[ -n "$rtk_exe" ]]; then
-        if doctor_probe "$rtk_exe" gain >/dev/null 2>&1; then
-            log "[OK]   RTK: rtk-ai token optimizer available ($rtk_exe)"
-            log '[NOTE] RTK agent hook integration is not verified by Doctor.'
-        else
-            warn '[!!]   RTK: binary exists but rtk gain failed (possibly another project).'
-            problems=$((problems+1))
-        fi
-    else
-        log '[--]   RTK: not installed'
-    fi
     doctor_bin 'Skills CLI' skills
     local inventory_python="$SCRIPT_DIR/.venv/bin/python"
     [[ -x "$inventory_python" ]] || inventory_python=python3
     if command -v "$inventory_python" >/dev/null 2>&1; then
+        if ! (cd "$SCRIPT_DIR" && "$inventory_python" -m tui.rtk_status); then
+            warn 'RTK binary verification failed.'
+            problems=$((problems+1))
+        fi
         if ! (cd "$SCRIPT_DIR" && "$inventory_python" -m tui.agent_status); then
             warn 'Ponytail inventory could not run; activation remains unverified.'
         fi
     else
-        warn 'Ponytail inventory requires Python 3.'
+        warn 'RTK/Ponytail inventory requires Python 3.'
     fi
 
     if (( problems > 0 )); then
