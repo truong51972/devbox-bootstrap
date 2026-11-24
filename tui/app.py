@@ -30,6 +30,7 @@ from tui.backend import (
 )
 from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, installed, inventory, with_dependencies
 from tui.agent_status import AGENTS, LABELS, discover_agents, probe_agent_detail as probe_agent, PluginStatus, summary as ponytail_summary
+from tui.rtk_status import RtkInventory, inspect_rtk, executable_path as rtk_executable_path
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
 from tui.update_check import UpdateCheck, check_update
 from tui.views import DevboxViews, WIDE_LAYOUT_MIN, SPLIT_SPACING, detail_panel_width
@@ -81,9 +82,9 @@ DESCRIPTIONS = {
     "kubectl": "Kubernetes command-line client.",
     "minikube": "Local Kubernetes environment.",
     "direnv": "Directory-specific environment variables.",
-    "rtk": "Token-saving command proxy. Agent hooks are opt-in.",
+    "rtk": "Compresses command output to save tokens.",
     "skills-cli": "Vercel Skills CLI; requires Node.js >= 22.20 and npm.",
-    "ponytail": "Ponytail coding-agent plugin; checked against agent plugin inventory.",
+    "ponytail": "Coding-agent plugin for concise workflows.",
 }
 WARNINGS = {
     "docker": "Docker group access grants root-equivalent privileges.",
@@ -155,6 +156,7 @@ class DevboxTUI(DevboxViews):
         # Discovery is PATH-only. No external CLI runs during TUI construction.
         self.ponytail_agents = discover_agents()
         self.ponytail_details: dict[str, PluginStatus] = {}
+        self.rtk_inventory: RtkInventory | None = None
         self.available = inventory(self.ponytail_agents, quick=True)
         self._agent_scan_task: asyncio.Task[None] | None = None
         self._agent_scan_completed_at = 0.0
@@ -372,6 +374,8 @@ class DevboxTUI(DevboxViews):
 
     def _refresh_agent_status(self) -> None:
         self.available.update(inventory(self.ponytail_agents, quick=True))
+        if self.rtk_inventory is not None:
+            self.available['rtk'] = self.rtk_inventory.state
         for code, value in self.available.items():
             self._set_component_status(code, value)
         self._schedule_agent_scan(force=True)
@@ -381,6 +385,7 @@ class DevboxTUI(DevboxViews):
         self._agent_scan_generation += 1
         self._agent_scan_completed_at = 0.0
         self.ponytail_details.clear()
+        self.rtk_inventory = None
         self.component_metadata = {}
         if self._agent_scan_task is not None and not self._agent_scan_task.done():
             self.tasks.cancel("agents")
@@ -394,16 +399,19 @@ class DevboxTUI(DevboxViews):
             return
         if (not force and self._agent_scan_completed_at
                 and time.monotonic() - self._agent_scan_completed_at < (
-                    10.0 if "Unverified" in self.ponytail_agents.values()
+                    10.0 if ("Unverified" in self.ponytail_agents.values()
+                             or (self.rtk_inventory is not None and
+                                 (self.rtk_inventory.binary.state == "Unverified" or
+                                  any(item.state == "Unverified" for item in self.rtk_inventory.agents.values()))))
                     else self.AGENT_SCAN_TTL)):
             return
 
         self.ponytail_agents = discover_agents()
         self.ponytail_details.clear()
+        self.rtk_inventory = None
         self._set_component_status("ponytail", ponytail_summary(self.ponytail_agents))
         self._set_component_status(
-            "rtk", "Unverified" if shutil.which("rtk") or
-            (Path.home() / ".local/bin/rtk").is_file() else "Missing",
+            "rtk", "Checking" if rtk_executable_path() else "Missing",
         )
         try:
             asyncio.get_running_loop()
@@ -427,14 +435,23 @@ class DevboxTUI(DevboxViews):
             self.ponytail_details[agent] = result
             self.ponytail_agents[agent] = result.state
             self._set_component_status("ponytail", ponytail_summary(self.ponytail_agents))
+            if result.state == "Unavailable" and self.rtk_inventory is not None:
+                self.rtk_inventory.agents[agent] = PluginStatus(agent, "Unavailable", "PATH", "CLI not installed")
+                self._set_component_status("rtk", self.rtk_inventory.state)
 
         async def check_rtk() -> None:
             try:
-                valid = await asyncio.to_thread(installed, "rtk")
-            except Exception:
-                valid = False
-            if generation == self._agent_scan_generation:
-                self._set_component_status("rtk", "Installed" if valid else ("Unverified" if shutil.which("rtk") or (Path.home() / ".local/bin/rtk").is_file() else "Missing"))
+                result = await asyncio.to_thread(inspect_rtk, self.ponytail_agents.copy())
+            except Exception as exc:
+                result = RtkInventory(
+                    PluginStatus("rtk", "Unverified", "inventory", type(exc).__name__), {})
+            if generation != self._agent_scan_generation:
+                return
+            for agent, state in self.ponytail_agents.items():
+                if state == "Unavailable":
+                    result.agents[agent] = PluginStatus(agent, "Unavailable", "PATH", "CLI not installed")
+            self.rtk_inventory = result
+            self._set_component_status("rtk", result.state)
 
         tasks = [
             check_agent(agent) for agent in AGENTS
@@ -713,8 +730,8 @@ class DevboxTUI(DevboxViews):
                 ("class:muted", "  Selected: "),
                 ("class:body", ("Yes" if selected else "No") + "\n"),
             ]
-            if item.key == "ponytail":
-                out.append(("class:muted", "  Press i for each agent's plugin status\n"))
+            if item.key in ("ponytail", "rtk"):
+                out.append(("class:muted", "  i: agent integrations\n"))
             elif item.key in WARNINGS:
                 out.append(("class:warning", "  NOTE: " + WARNINGS[item.key]))
             return out
@@ -729,20 +746,45 @@ class DevboxTUI(DevboxViews):
             ("class:title", "  " + item.label + "\n"),
             ("class:muted", "  " + (item.group or "OTHER") + "\n\n"),
         ]
-        # Put per-agent information *first*, where it is visible without
-        # scrolling even on moderately tall terminal windows.
-        if item.key == "ponytail":
+        if item.key in ("rtk", "ponytail"):
+            if item.key == "rtk":
+                result = self.rtk_inventory
+                binary = result.binary.state if result else ("Checking" if rtk_executable_path() else "Missing")
+                out.extend([("class:muted", "  Binary: "),
+                            (STATUS_STYLES.get(binary, "class:body"), binary + "\n")])
+                if result and (full or binary == "Unverified"):
+                    out.append(("class:muted", "    " + result.binary.reason + "\n"))
+                states = {agent: status.state for agent, status in result.agents.items()} if result else {
+                    agent: "Unavailable" if state == "Unavailable" else "Checking"
+                    for agent, state in self.ponytail_agents.items()}
+                details = result.agents if result else {}
+            else:
+                states, details = self.ponytail_agents, self.ponytail_details
             out.append(("class:section", "  AGENT INTEGRATIONS\n"))
             for agent in AGENTS:
-                state = self.ponytail_agents.get(agent, "Unavailable")
+                state = states.get(agent, "Unavailable")
+                detail = details.get(agent)
+                suffix = " (rules)" if detail and detail.source == "instructions" else ""
                 out.extend([
-                    ("class:muted", f"  {LABELS[agent]:<12} "),
-                    (STATUS_STYLES.get(state, "class:body"), state + "\n"),
+                    ("class:body", f"  {LABELS[agent]:<13} "),
+                    (STATUS_STYLES.get(state, "class:body"), state + suffix + "\n"),
                 ])
-                detail = self.ponytail_details.get(agent)
-                if detail:
-                    out.append(("class:muted", f"    {detail.source}: {detail.reason}\n"))
-            out.append(("class:muted", "  r to refresh · registration, not runtime activation\n\n"))
+                if detail and (full or state == "Unverified"):
+                    reason = detail.reason if full else self._truncate(detail.reason, max(10, detail_panel_width(self.columns()) - 6))
+                    out.append(("class:muted", f"    {reason}\n"))
+            out.append(("class:muted", "  User config only · runtime not checked\n\n"))
+        if not full:
+            out.extend([
+                ("class:muted", "  State: "), (status_style, item.status + "\n"),
+                ("class:muted", "  Selected: "), ("class:body", ("Yes" if selected else "No") + "\n"),
+            ])
+            if deps != "None":
+                out.append(("class:muted", f"  Requires: {deps}\n"))
+            out.append(("class:body", "\n  " + item.description + "\n"))
+            if item.key in WARNINGS:
+                out.append(("class:warning", "\n  " + WARNINGS[item.key] + "\n"))
+            out.append(("class:muted", "\n  i Details · r Refresh\n"))
+            return out
         out.extend([
             ("class:section", "  OVERVIEW\n"),
             ("class:muted", "  State: "),
@@ -997,6 +1039,8 @@ class DevboxTUI(DevboxViews):
         elif action in ("install", "upgrade"):
             self.action = action
             self.available = inventory(self.ponytail_agents, quick=True)
+            if self.rtk_inventory is not None:
+                self.available['rtk'] = self.rtk_inventory.state
             self.dry_run = False
             # Preserve last inventory while navigating; refresh lazily after TTL.
             self.selector = self._make_selector()
