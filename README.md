@@ -240,13 +240,13 @@ devbox --clean --scan --json          # inspect exact resource tokens
 devbox --clean --help
 ```
 
-Safe means regenerable caches (rebuilds/downloads may take time): old dangling
-Docker dangling images (all ages) and all unused Engine build cache (7 days), pip/npm downloads and APT archives.
-Old unused tagged Docker images, unused local Docker volumes (including named
+Safe means regenerable caches (rebuilds/downloads may take time): Docker dangling
+images (all ages), all unused Engine build cache (7 days), pip/npm downloads and APT archives.
+Unused tagged Docker images, unused local Docker volumes (including named
 volumes), uv prune/full clean and Devbox logs/events older than 30 days are manual-only.
 Both Docker resource groups require explicit individual resource tokens; no bulk prune or forced rm.
 In the TUI, select the Manual category, then choose exact resources and acknowledge risk in confirmation.
-Volume tokens bind the inspected metadata to the endpoint and protected/non-local/driver-option volumes are excluded.
+Volume tokens bind the inspected metadata to the endpoint and protected/non-local/driver-option volumes are excluded. Individual volume sizes are shown when the Docker CLI reports them; manual inventory runs separately from safe probes.
 The Engine daemon is explicitly scoped; custom Buildx builders are not inventoried or pruned.
 The uv prune operation remains manual because existing symlink-mode environments cannot be ruled out globally.
 Result states distinguish actual reported cleanup, zero reported reclaim, unknown measurement, skipped and failed.

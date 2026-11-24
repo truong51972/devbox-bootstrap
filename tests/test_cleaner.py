@@ -5,7 +5,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import subprocess
 from tui.cleaner import (BY_KEY, SAFE_KEYS, PROBE_GROUPS, Scan, Outcome, select_keys, docker_prefix,
-                         main, scan_group, size, pip_cache_command, native_outcome, validate_resources)
+                         main, scan_group, size, pip_cache_command, native_outcome, validate_resources,
+                         execute, volume_token, eligible_volume)
 from tui.app import DevboxTUI
 from tui.backend import build_command
 from tui.ui import Entry, KeyboardList
@@ -169,6 +170,28 @@ class CleanerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_resources(["docker-build-cache"], ["volume:example:" + "a" * 64])
 
+    def test_image_rm_only_exact_id_without_force_or_parent_prune(self):
+        prefix = ["docker", "--host", "unix:///docker.sock"]
+        token = "image:sha256:" + "a" * 64
+        with patch("tui.cleaner.docker_resources", return_value=({"token": token},)), \
+                patch("tui.cleaner.run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+            outcome = execute(BY_KEY["docker-unused-images"], prefix, [token])
+        self.assertEqual(outcome.state, "CLEANED")
+        run.assert_called_once_with(prefix + ["image", "rm", "--no-prune", token.removeprefix("image:")], timeout=900)
+
+    def test_recreated_volume_is_not_removed(self):
+        prefix = ["docker", "--host", "unix:///docker.sock"]
+        old = {"Name": "example", "Driver": "local", "CreatedAt": "2025-01-01"}
+        token = volume_token(prefix, old)
+        changed = dict(old, CreatedAt="2026-01-01")
+        with patch("tui.cleaner.docker_resources", return_value=({"token": token},)), \
+                patch("tui.cleaner.checked", return_value=__import__("json").dumps([changed])), \
+                patch("tui.cleaner.run") as run:
+            outcome = execute(BY_KEY["docker-volumes"], prefix, [token])
+        self.assertEqual(outcome.state, "SKIPPED")
+        run.assert_not_called()
+        self.assertFalse(eligible_volume(dict(old, Labels={"devbox.protect": "true"})))
+
     def test_no_volume_or_tagged_image_in_safe_commands(self):
         for key in SAFE_KEYS:
             command = BY_KEY[key].command
@@ -251,7 +274,7 @@ class ProgressiveScanTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(fast.wait(), timeout=1)
             await asyncio.sleep(0)
             self.assertIn("pip-cache", app.cleaner_rows)
-            self.assertNotIn("docker-volumes", app.cleaner_rows)
+            self.assertNotIn("docker-build-cache", app.cleaner_rows)
             app.cleaner_list.current_values = ["pip-cache"]
             app.confirm_cleaners()
             self.assertEqual(app.screen, "confirm")
@@ -262,7 +285,7 @@ class ProgressiveScanTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.screen, "home")
             with self.assertRaises(asyncio.CancelledError):
                 await task
-            self.assertNotIn("docker-volumes", app.cleaner_rows)
+            self.assertNotIn("docker-build-cache", app.cleaner_rows)
 
     async def test_group_failure_isolated(self):
         app = DevboxTUI()
@@ -276,9 +299,9 @@ class ProgressiveScanTests(unittest.IsolatedAsyncioTestCase):
             app.open_cleaner()
             await app.cleaner_scan_task
             self.assertEqual(len(app.cleaner_rows), len(BY_KEY))
-            self.assertFalse(app.cleaner_rows["docker-volumes"].available)
+            self.assertFalse(app.cleaner_rows["docker-build-cache"].available)
             self.assertTrue(app.cleaner_rows["pip-cache"].available)
-            self.assertIn("timed out", app.cleaner_rows["docker-volumes"].note)
+            self.assertIn("timed out", app.cleaner_rows["docker-build-cache"].note)
 
 
 if __name__ == "__main__":

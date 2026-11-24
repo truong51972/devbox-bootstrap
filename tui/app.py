@@ -1210,6 +1210,8 @@ class DevboxTUI:
                 lines.append("Select exact image IDs/volume names in Options; no bulk prune.")
                 chosen_resources = [key for key in self.options.current_values if key.startswith(("image:", "volume:"))]
                 lines.append(f"Individual resources selected: {len(chosen_resources)}")
+                lines.extend("  " + entry.label for entry in self.options.entries
+                             if entry.key in chosen_resources)
             return "\n".join(lines)
         labels = dict(COMPONENTS)
         lines = [f"{self.action.title()}: {len(self.selected)} component(s)", mode, ""]
@@ -1248,12 +1250,15 @@ class DevboxTUI:
             return
         chosen = list(self.selector.current_values) if selected is None and action in ("install", "upgrade") else list(selected or [])
         try:
+            endpoints = {self.cleaner_rows[key].endpoint for key in chosen
+                         if action == "clean" and key in self.cleaner_rows and self.cleaner_rows[key].endpoint}
+            if len(endpoints) > 1:
+                raise ValueError("Docker context changed during scan; rescan required.")
             command = build_command(action, chosen, dry_run=self.dry_run,
                                     agents=self._chosen_agents() if action == "install" else [],
                                     allow_risky=action == "clean" and "risk" in self.options.current_values,
                                     resources=[key for key in self.options.current_values if key.startswith(("image:", "volume:"))] if action == "clean" else [],
-                                    docker_endpoint=next((self.cleaner_rows[key].endpoint for key in chosen
-                                        if key in self.cleaner_rows and self.cleaner_rows[key].endpoint), "") if action == "clean" else "")
+                                    docker_endpoint=next(iter(endpoints), ""))
         except ValueError as exc:
             self._notice(str(exc))
             return

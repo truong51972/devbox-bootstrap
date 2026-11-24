@@ -132,7 +132,11 @@ def docker_df(prefix):
 
 def size_bytes(path):
     path = Path(path)
-    if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+    if not path.is_absolute() or path.is_symlink():
+        return None
+    if not path.exists():
+        return 0 if path.parent.is_dir() else None
+    if not path.is_dir():
         return None
     try:
         result = run(["du", "-sx", "--block-size=1", "--", str(path)])
@@ -169,13 +173,14 @@ def old_logs():
                 yield path, stat.st_blocks * 512
 
 
-# Docker inventory is shared by its four rows; package probes are independent.
+# Keep slow individual-resource inventory separate from the All-safe probe.
 PROBE_GROUPS = {
-    "docker": tuple(item.key for item in CLEANERS if item.tool == "docker"),
+    "docker": tuple(item.key for item in CLEANERS if item.tool == "docker" and item.safe),
+    "docker-manual": tuple(RESOURCE_KEYS),
     **{item.key: (item.key,) for item in CLEANERS if item.tool != "docker"},
 }
 PROBE_CONCURRENCY = 4
-PROBE_TIMEOUT = 50  # Docker also inventories individual manual resources.
+PROBE_TIMEOUT = 30
 
 
 def pip_cache_command():
@@ -204,6 +209,31 @@ def volume_token(prefix, row):
         [prefix[-1], row], sort_keys=True, separators=(",", ":")
     ).encode()).hexdigest()
     return "volume:" + row["Name"] + ":" + stamp
+
+
+def eligible_volume(row):
+    return (row.get("Driver") == "local" and bool(row.get("CreatedAt"))
+            and (row.get("Labels") or {}).get("devbox.protect") != "true"
+            and not row.get("Options"))
+
+
+def volume_sizes(prefix):
+    """Optional sizes from the CLI; unsupported output never blocks selection."""
+    output = checked(prefix + ["system", "df", "-v"], timeout=5)
+    section = False
+    sizes = {}
+    for line in output.splitlines():
+        if line.strip().startswith("Local Volumes space usage:"):
+            section = True
+            continue
+        if not section:
+            continue
+        if line.strip().endswith("space usage:"):
+            break
+        fields = line.split()
+        if len(fields) == 3 and fields[1].isdigit():
+            sizes[fields[0]] = fields[2]
+    return sizes
 
 
 def docker_resources(prefix, key):
@@ -235,10 +265,7 @@ def docker_resources(prefix, key):
         return ()
     volumes = json.loads(checked(prefix + ["volume", "inspect", *names], timeout=5))
     return tuple({"token": volume_token(prefix, row), "label": row["Name"],
-                  "size": "unknown"} for row in volumes
-                 if row.get("Driver") == "local" and row.get("CreatedAt")
-                 and (row.get("Labels") or {}).get("devbox.protect") != "true"
-                 and not row.get("Options"))
+                  "size": "unknown"} for row in volumes if eligible_volume(row))
 
 
 def resource_kind(token):
@@ -262,10 +289,10 @@ def scan_group(group, docker_target=None, *, measure=True):
     keys = PROBE_GROUPS[group]
     rows = []
     docker, docker_error = {}, ""
-    if group == "docker" and shutil.which("docker"):
+    if group in {"docker", "docker-manual"} and shutil.which("docker"):
         try:
             prefix = docker_target if docker_target is not None else docker_prefix()
-            if measure:
+            if measure and group == "docker":
                 try:
                     docker = docker_df(prefix)
                     if not docker:
@@ -298,9 +325,18 @@ def scan_group(group, docker_target=None, *, measure=True):
                 if item.key in RESOURCE_KEYS and measure:
                     try:
                         resources = docker_resources(prefix, item.key)
+                        if item.key == "docker-volumes" and resources:
+                            try:
+                                sizes = volume_sizes(prefix)
+                                resources = tuple(dict(row, size=sizes.get(row["label"], "unknown")) for row in resources)
+                            except (OSError, RuntimeError, subprocess.TimeoutExpired):
+                                pass
                         note += f" {len(resources)} individually eligible resources."
                     except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
                         note += f" Resource inventory unavailable: {exc}"
+                    if not resources:
+                        rows.append(Scan(item.key, False, "-", note + " No eligible resources.", (), prefix[-1]))
+                        continue
                 rows.append(Scan(item.key, True, estimate, note, resources, prefix[-1]))
                 continue
             if item.key == "devbox-logs":
@@ -337,7 +373,7 @@ async def probe_group(group):
         stdin=subprocess.DEVNULL, start_new_session=True,
     )
     try:
-        output, _ = await asyncio.wait_for(process.communicate(), PROBE_TIMEOUT)
+        output, _ = await asyncio.wait_for(process.communicate(), 50 if group == "docker-manual" else PROBE_TIMEOUT)
         if process.returncode:
             raise RuntimeError("Inventory worker failed")
         rows = [Scan(**row) for row in json.loads(output)]
@@ -370,12 +406,12 @@ def event(key, state):
             stream.write(f"STATUS\t{key}\t{state}\n")
 
 
-def native_outcome(result, before=None, after=None):
+def native_outcome(result, before=None, after=None, *, docker=True):
     if result.returncode:
         return Outcome("FAILED", f"exit {result.returncode}")
     # Docker reports actual reclaimed storage, not total cache-record size.
     match = re.search(r"(?:Total reclaimed space|Total):\s*([\d.]+)\s*([kKMGT]?B)\b",
-                      result.stdout + "\n" + result.stderr)
+                      result.stdout + "\n" + result.stderr) if docker else None
     if match:
         value = float(match.group(1))
         return Outcome("CLEANED" if value > 0 else "NO_RECLAIM",
@@ -424,7 +460,18 @@ def execute(item, docker_target=None, resources=()):
                     skipped += 1
                     continue
                 target = token.removeprefix("image:") if kind == "image" else token.split(":")[1]
-                argv = docker_target + [kind, "rm", target]
+                if kind == "volume":
+                    # Recheck the exact volume immediately before rm; the daemon
+                    # rejects referenced volumes even if they became active.
+                    try:
+                        inspected = json.loads(checked(docker_target + ["volume", "inspect", target], timeout=5))
+                        if len(inspected) != 1 or not eligible_volume(inspected[0]) or volume_token(docker_target, inspected[0]) != token:
+                            skipped += 1
+                            continue
+                    except (OSError, ValueError, RuntimeError, KeyError, subprocess.TimeoutExpired):
+                        skipped += 1
+                        continue
+                argv = docker_target + [kind, "rm"] + (["--no-prune"] if kind == "image" else []) + [target]
                 result = run(argv, timeout=900)
                 print(result.stdout + result.stderr, flush=True)
                 if result.returncode:
@@ -441,13 +488,16 @@ def execute(item, docker_target=None, resources=()):
         argv = ["sudo", "-n", item.tool, *item.command]
     else:
         argv = [item.tool, *item.command]
-    path = cache_path(item)
+    try:
+        path = cache_path(item)
+    except (OSError, RuntimeError, subprocess.TimeoutExpired):
+        path = None  # Measurement is optional, not an execution prerequisite.
     before = size_bytes(path) if path else None
     print("+ " + " ".join(argv), flush=True)
     result = run(argv, timeout=900)
     print(result.stdout + result.stderr, flush=True)
     after = size_bytes(path) if path else None
-    return native_outcome(result, before, after)
+    return native_outcome(result, before, after, docker=item.tool == "docker")
 
 
 def main(argv=None):
