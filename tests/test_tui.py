@@ -30,6 +30,7 @@ class TUIBasicTests(unittest.TestCase):
         self.assertEqual(build_command("update", []), ["bash", str(ROOT / "bin/devbox"), "--update"])
 
     def test_agent_target_dispatch_and_validation(self):
+        self.assertEqual(build_command("install", ["rtk", "ponytail"], agents=["agy"])[-2:], ["--agents", "agy"])
         self.assertEqual(
             build_command("install", ["rtk", "ponytail"], agents=["codex", "claude"]),
             ["bash", str(ROOT / "setup-ubuntu.sh"), "--only", "rtk,ponytail",
