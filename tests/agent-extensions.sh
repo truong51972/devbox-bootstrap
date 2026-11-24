@@ -23,6 +23,7 @@ expect_fail 'Ponytail requires --agents' --only ponytail
 
 # No network, sudo, agent config or package changes during dry-run.
 output="$(bash setup-ubuntu.sh --dry-run --only rtk,skills-cli,ponytail --agents codex,claude)"
+bash setup-ubuntu.sh --dry-run --only rtk,ponytail --agents agy >/dev/null
 [[ "$output" == *'Would run: installers/rtk.sh'* ]]
 [[ "$output" == *'Would run: installers/skills-cli.sh'* ]]
 [[ "$output" == *'Would run: installers/ponytail.sh'* ]]
