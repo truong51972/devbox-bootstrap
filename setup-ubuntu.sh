@@ -20,7 +20,7 @@ Components:
   zsh, powerlevel10k, uv, keychain, zoxide,
   fzf, ripgrep, bat-fd, direnv,
   docker, nvidia, kubectl, minikube, clean,
-  rtk, skills-cli, ponytail
+  rtk, skills-cli, ponytail, tmux, btop, gh, jq
 
 Examples:
   bash setup-ubuntu.sh --preflight
@@ -83,7 +83,7 @@ if [[ -n "$ONLY_COMPONENTS" ]]; then
     IFS=',' read -r -a requested <<< "$ONLY_COMPONENTS"
     for component in "${requested[@]}"; do
         case "$component" in
-            zsh|powerlevel10k|uv|keychain|zoxide|fzf|ripgrep|bat-fd|direnv|docker|nvidia|kubectl|minikube|clean|rtk|skills-cli|ponytail) ;;
+            zsh|powerlevel10k|uv|keychain|zoxide|fzf|ripgrep|bat-fd|direnv|docker|nvidia|kubectl|minikube|clean|rtk|skills-cli|ponytail|tmux|btop|gh|jq) ;;
             *) printf 'Unknown component: %s\n' "$component" >&2; exit 2 ;;
         esac
     done
@@ -269,6 +269,7 @@ verify_component() {
                     return 1
                 fi
             fi ;;
+        tmux|btop|gh|jq) verify_binary "$component" "$component" || return 1 ;;
         clean) return 0 ;;
         *) die "Internal error: unknown component $component"; return 1 ;;
     esac
@@ -391,6 +392,10 @@ run_component direnv 'Install direnv?' direnv.sh
 run_component rtk 'Install RTK (token optimizer)?' rtk.sh
 run_component skills-cli 'Install Skills CLI (Node.js required)?' skills-cli.sh
 run_component ponytail 'Install Ponytail for selected agents?' ponytail.sh
+run_component tmux 'Install tmux?' tmux.sh
+run_component btop 'Install btop?' btop.sh
+run_component gh 'Install GitHub CLI?' gh.sh
+run_component jq 'Install jq?' jq.sh
 # Explicit legacy cache-only alias, not part of interactive provisioning.
 if [[ -n "$ONLY_COMPONENTS" ]]; then
     run_component clean 'Clean APT download cache?' clean.sh

@@ -47,7 +47,7 @@ class TUIBasicTests(unittest.TestCase):
 
     def test_ponytail_cannot_start_without_explicit_agent(self):
         app = DevboxTUI()
-        app.open_menu()
+        app.open_menu("install")
         app.selector.current_values = ["ponytail"]
         app.confirm_selection()
         self.assertEqual(app.screen, "confirm")
@@ -69,8 +69,8 @@ class TUIBasicTests(unittest.TestCase):
 
     def test_menu_component_confirmation_and_dependencies(self):
         app = DevboxTUI()
-        self.assertEqual(app.menu.current_value, "install")
-        app.open_menu()
+        self.assertEqual(app.menu.current_value, "quick")
+        app.open_menu("install")
         self.assertEqual(app.screen, "select")
         app.available["docker"] = "Missing"
         app.selector.current_values = ["nvidia"]
@@ -132,7 +132,7 @@ class TUIBasicTests(unittest.TestCase):
                     run = asyncio.create_task(app.app.run_async())
                     try:
                         await asyncio.sleep(0.10)
-                        input_pipe.send_text("\r")
+                        input_pipe.send_text("jj\r\r")
                         await asyncio.sleep(0.10)
                         self.assertEqual(app.screen, "select")
                         input_pipe.send_text(" ")  # Toggle current checkbox.
@@ -174,7 +174,7 @@ class TUIBasicTests(unittest.TestCase):
                             run = asyncio.create_task(app.app.run_async())
                             try:
                                 await asyncio.sleep(0.10)
-                                pipe.send_text("jj\r")  # Doctor is third menu entry.
+                                pipe.send_text("j" * next(i for i, e in enumerate(app.menu.entries) if e.key == "health") + "\r\r")
                                 for _ in range(30):
                                     await asyncio.sleep(0.10)
                                     if app.screen == "result":

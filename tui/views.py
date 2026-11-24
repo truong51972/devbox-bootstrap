@@ -36,7 +36,7 @@ class DevboxViews:
 
     def _page(self, title: str, body, shortcut: str):
         compact = {
-            "Main menu": "↑↓ Move  Enter Open  Ctrl+K Search  q Quit",
+            "Overview": "↑↓ Move  Enter Open  Ctrl+K Search  q Quit",
             "Components": "↑↓ Move  Space Toggle  / Filter  i Info  r Refresh  Enter Next",
             "Cleaner": "Space Toggle  a Safe  / Filter  i Info  r Scan  Enter Next  Esc",
             "Confirm": "Space Options  d Dry-run  Enter Run  Esc Back",
@@ -76,7 +76,7 @@ class DevboxViews:
 
     def _build_views(self) -> None:
         self.views["home"] = self._page(
-            "Main menu",
+            "Overview",
             DynamicContainer(self._home_layout),
             "↑↓ Navigate   Enter Open   Ctrl+K Search   t Theme   ? Help   q Quit",
         )

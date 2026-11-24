@@ -47,34 +47,28 @@ from tui.cleaner import (BY_KEY as CLEANER_ITEMS, SAFE_KEYS, PROBE_GROUPS,
 FINISHED_STATES = FINAL_STATES
 # Stable width across Home, Components and History; remaining columns go to the list.
 MENU = (
-    ("install", "Install components"),
-    ("upgrade", "Upgrade components"),
-    ("doctor", "Doctor - check configuration"),
-    ("preflight", "Preflight - inspect host"),
-    ("clean", "Cleaner - reclaim disk space"),
-    ("update", "Update Devbox source"),
-    ("logs", "Logs and history"),
     ("quick", "Quick Actions"),
     ("favorites", "Favorites"),
     ("environment", "Development Tools"),
     ("agents", "Coding Agents"),
     ("network", "Networking"),
     ("system", "System Utilities"),
-    ("containers", "Container Utilities"),
-    ("storage", "Storage Inventory"),
-    ("project", "Project Actions"),
+    ("containers", "Containers"),
+    ("storage", "Storage & Cleaner"),
+    ("project", "Project & Workflows"),
     ("utilities", "Data & Text Utilities"),
-    ("workflows", "Workflows"),
+    ("health", "System Health"),
+    ("logs", "Activity"),
+    ("settings", "Settings & Update"),
     ("exit", "Exit"),
 )
 MENU_GROUPS = {
-    "install": "SETUP", "upgrade": "SETUP", "doctor": "SYSTEM",
-    "preflight": "SYSTEM", "clean": "MAINTENANCE", "update": "MAINTENANCE", "logs": "MAINTENANCE",
     "quick": "QUICK ACCESS", "favorites": "QUICK ACCESS",
-    "environment": "TOOLKIT", "agents": "TOOLKIT", "network": "TOOLKIT",
-    "system": "TOOLKIT", "containers": "TOOLKIT", "storage": "TOOLKIT",
-    "project": "TOOLKIT", "utilities": "TOOLKIT", "workflows": "TOOLKIT",
-    "exit": "SESSION",
+    "environment": "MANAGE", "agents": "MANAGE",
+    "network": "INSPECT & OPERATE", "system": "INSPECT & OPERATE",
+    "containers": "INSPECT & OPERATE", "storage": "INSPECT & OPERATE",
+    "project": "INSPECT & OPERATE", "utilities": "INSPECT & OPERATE",
+    "health": "DEVBOX", "logs": "DEVBOX", "settings": "DEVBOX", "exit": "DEVBOX",
 }
 MENU_DETAILS = {
     "install": "Choose development tools and install only what you need.",
@@ -95,6 +89,8 @@ MENU_DETAILS = {
     "project": "Discover the invocation directory and Git context.",
     "utilities": "Local text, encoding, IDs and checksums.",
     "workflows": "Preview and launch explicitly approved commands.",
+    "health": "Structured diagnostics, Doctor and host preflight.",
+    "settings": "Theme, self-update and preferences.",
     "exit": "Leave Devbox without modifying the system.",
 }
 DESCRIPTIONS = {
@@ -114,6 +110,10 @@ DESCRIPTIONS = {
     "rtk": "Compresses command output to save tokens.",
     "skills-cli": "Vercel Skills CLI; requires Node.js >= 22.20 and npm.",
     "ponytail": "Coding-agent plugin for concise workflows.",
+    "tmux": "Persistent terminal sessions.",
+    "btop": "Interactive resource monitor.",
+    "gh": "GitHub command-line interface.",
+    "jq": "Command-line JSON processing.",
 }
 WARNINGS = {
     "docker": "Docker group access grants root-equivalent privileges.",
@@ -970,9 +970,10 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
     def _bind_text(self, widget, *, result=False, log_viewer=False) -> None:
         kb = KeyBindings()
 
-        @kb.add("c-k", filter=Condition(lambda: not self.busy and self.screen not in ("confirm", "update_prompt", "toolkit_confirm", "toolkit_input") and not self.filter_active), eager=True)
+        @kb.add("c-k", filter=Condition(lambda: not self.busy and self.screen in ("home", "toolkit") and not self.filter_active), eager=True)
         def _quick(_event):
             self.open_toolkit()
+            self._begin_filter()
 
         @kb.add("escape")
         def _back(_event):
@@ -1088,15 +1089,15 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self.app.style = Style.from_dict(THEMES[self.theme])
         self._notice(f"Theme: {self.theme}. Set DEVBOX_THEME={self.theme} to keep it on launch.")
 
-    def open_menu(self) -> None:
-        action = self.menu.current_value
+    def open_menu(self, action=None) -> None:
+        action = action or self.menu.current_value
         if action == "exit":
             self.quit()
-        elif action in ("quick", "favorites", "environment", "agents", "network", "system", "containers", "storage", "project", "utilities", "workflows"):
+        elif action in ("quick", "favorites", "environment", "agents", "network", "system", "containers", "storage", "project", "utilities", "workflows", "health", "settings"):
             categories = {"quick": None, "favorites": "Favorites", "environment": "Environment",
                           "agents": "Coding Agents", "network": "Networking", "system": "System",
                           "containers": "Containers", "storage": "Storage", "project": "Project",
-                          "utilities": "Utilities", "workflows": "Workflows"}
+                          "utilities": "Utilities", "workflows": "Workflows", "health": "Health", "settings": "Settings"}
             self.open_toolkit(categories[action])
         elif action in ("install", "upgrade"):
             self.action = action

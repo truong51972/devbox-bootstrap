@@ -139,6 +139,7 @@ class KeyboardList:
         on_details: Callable[[], None] | None = None,
         on_theme: Callable[[], None] | None = None,
         on_refresh: Callable[[], None] | None = None,
+        on_favorite: Callable[[], None] | None = None,
     ) -> None:
         self.entries = list(entries)
         self.multiple = multiple
@@ -203,6 +204,11 @@ class KeyboardList:
             @kb.add("i")
             def _details(_event) -> None:
                 on_details()
+
+        if on_favorite:
+            @kb.add("f")
+            def _favorite(_event) -> None:
+                on_favorite()
 
         if on_refresh:
             @kb.add("r")

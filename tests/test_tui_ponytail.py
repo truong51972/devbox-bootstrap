@@ -264,7 +264,7 @@ class PonytailStatusTests(unittest.TestCase):
                    side_effect=AssertionError("Blocking inventory")):
             app = DevboxTUI()
             self.assertIsNotNone(app)
-            app.open_menu()
+            app.open_menu("install")
             self.assertEqual(app.screen, "select")
 
     def test_async_scans_all_detected_agents_and_manual_refresh(self):
@@ -286,7 +286,7 @@ class PonytailStatusTests(unittest.TestCase):
                  patch("tui.app.inspect_rtk", return_value=__import__("tui.rtk_status", fromlist=["RtkInventory"]).RtkInventory(agent_status.PluginStatus("rtk", "Missing", "test", "fixture"), {})):
                 app = DevboxTUI()
                 start = time.monotonic()
-                app.open_menu()
+                app.open_menu("install")
                 duration = time.monotonic() - start
                 # Old code would block for an entire CLI timeout here.
                 self.assertLess(duration, 0.20)
@@ -333,7 +333,7 @@ class PonytailStatusTests(unittest.TestCase):
                  patch("tui.app.probe_agent", side_effect=delayed_agent), \
                  patch("tui.app.inspect_rtk", return_value=__import__("tui.rtk_status", fromlist=["RtkInventory"]).RtkInventory(agent_status.PluginStatus("rtk", "Missing", "test", "fixture"), {})):
                 app = DevboxTUI()
-                app.open_menu()
+                app.open_menu("install")
                 await asyncio.sleep(0.025)
                 app._invalidate_agent_scan()
                 self.assertIsNone(app._agent_scan_task)
@@ -361,7 +361,7 @@ class PonytailStatusTests(unittest.TestCase):
                  }[agent], "test", "fixture")), \
                  patch("tui.app.inspect_rtk", return_value=__import__("tui.rtk_status", fromlist=["RtkInventory"]).RtkInventory(agent_status.PluginStatus("rtk", "Missing", "test", "fixture"), {})):
                 app = DevboxTUI()
-                app.open_menu()
+                app.open_menu("install")
                 await asyncio.wait_for(app._agent_scan_task, timeout=2)
                 self.assertEqual(app.available["ponytail"], "Partial")
                 self.assertEqual(app.ponytail_agents["copilot"], "Missing")

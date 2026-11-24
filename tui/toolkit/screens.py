@@ -29,6 +29,19 @@ MANAGED = {
 }
 
 
+LEGACY_ENTRIES = (
+    ("install", "Install tools", "Environment", "Select components and review the install plan."),
+    ("upgrade", "Upgrade tools", "Environment", "Upgrade installed components through their managers."),
+    ("agent-install", "Install agent extensions", "Coding Agents", "Select RTK, Skills CLI or Ponytail."),
+    ("clean", "Cleaner", "Storage", "Scan caches and review safe or manual cleanup."),
+    ("doctor", "Doctor", "Health", "Run existing read-only health checks."),
+    ("preflight", "Host preflight", "Health", "Inspect host prerequisites."),
+    ("update", "Update Devbox source", "Settings", "Fast-forward Devbox and exit on success."),
+    ("theme", "Toggle theme", "Settings", "Switch between color and monochrome."),
+    ("logs", "Activity / history", "Activity", "Inspect previous managed operations."),
+)
+
+
 class ToolkitScreens:
     def init_toolkit(self):
         self.toolkit_cwd = os.environ.get("DEVBOX_INVOCATION_CWD") or str(Path.cwd())
@@ -42,7 +55,7 @@ class ToolkitScreens:
         self.toolkit_recent = []
         self.toolkit_list = KeyboardList([], on_enter=self.toolkit_open_action,
             on_back=self.back, on_help=self._show_help, on_change=self._invalidate,
-            on_filter=self._begin_filter, on_details=self.toolkit_favorite,
+            on_filter=self._begin_filter, on_favorite=self.toolkit_favorite,
             get_columns=self._component_list_width)
         self.toolkit_input = TextArea(multiline=True, scrollbar=True, wrap_lines=True)
         self.toolkit_result = TextArea(read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
@@ -72,7 +85,7 @@ class ToolkitScreens:
     def build_toolkit_views(self):
         self.views["toolkit"] = self._page("Quick actions", HSplit([
             DynamicContainer(self.toolkit_layout), DynamicContainer(self._filter_layout),
-        ]), "↑↓ Move   / Search   i Favorite   Enter Open   Esc Back")
+        ]), "↑↓ Move   / Search   f Favorite   Enter Open   Esc Back")
         self.views["toolkit_input"] = self._page("Action input", HSplit([
             self._text(self.toolkit_prompt, height=3), self._divider(), self.toolkit_input,
         ]), "Ctrl+S Run   Enter New line   Esc Back")
@@ -86,7 +99,9 @@ class ToolkitScreens:
         return self.toolkit_task is not None and not self.toolkit_task.done()
 
     def toolkit_entries(self):
-        rows = []
+        rows = [Entry("legacy:" + key, label, category, "", desc)
+                for key, label, category, desc in LEGACY_ENTRIES
+                if self.toolkit_category in (None, category)]
         for a in ACTIONS:
             if self.toolkit_category not in (None, "Favorites", a.category):
                 continue
@@ -98,13 +113,13 @@ class ToolkitScreens:
             if self.toolkit_category in (None, category):
                 rows.append(Entry(key, label, category, "", description + " " + key))
         for key, w in self.toolkit_workflows.items():
-            if self.toolkit_category in (None, "Workflows"):
+            if self.toolkit_category in (None, "Workflows", "Project"):
                 rows.append(Entry("run:" + key, key, "Workflows", "", w.description))
         if self.toolkit_category is None:
             order = {key: index for index, key in enumerate(self.toolkit_recent)}
             rows.sort(key=lambda r: (r.group, r.key not in self.toolkit_favorites, order.get(r.key, 999), r.label))
         else:
-            rows.sort(key=lambda r: (r.group, r.label))
+            rows.sort(key=lambda r: (not r.key.startswith("legacy:"), r.group, r.key != "legacy:install", r.label))
         return rows
 
     def open_toolkit(self, category=None):
@@ -146,7 +161,7 @@ class ToolkitScreens:
                 ("class:body", "  " + entry.description + "\n\n"),
                 ("class:muted", "  Mode: " + mode + "\n"),
                 ("class:muted", "  Project: " + self.toolkit_cwd + "\n"),
-                ("class:muted", "  i Favorite · / Search\n")]
+                ("class:muted", "  f Favorite · / Search\n")]
 
     def toolkit_favorite(self):
         key = self.toolkit_list.current_value
@@ -192,6 +207,16 @@ class ToolkitScreens:
         self.toolkit_plan = None
         self.toolkit_workflow = None
         self.toolkit_input.text = ""
+        if key.startswith("legacy:"):
+            action = key[7:]
+            if action == "theme":
+                self.toggle_theme()
+            elif action == "agent-install":
+                self.open_menu("install")
+                self.selector.set_query("AI AGENT EXTENSIONS")
+            else:
+                self.open_menu(action)
+            return
         if key.startswith("run:"):
             self.toolkit_workflow = self.toolkit_workflows[key[4:]]
             self.toolkit_confirm.index = 0

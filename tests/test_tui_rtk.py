@@ -134,11 +134,11 @@ class RtkStatusTests(unittest.TestCase):
                  patch("tui.app.inspect_components", return_value={}):
                 app = DevboxTUI()
                 app.columns = lambda: 120
-                app.open_menu()
+                app.open_menu("install")
                 await asyncio.wait_for(app._agent_scan_task, timeout=2)
                 self.assertEqual(app.available["rtk"], "Installed")
                 self.assertEqual(app.rtk_inventory.agents["copilot"].state, "Unavailable")
-                app.open_menu()
+                app.open_menu("install")
                 self.assertEqual(app.available["rtk"], "Installed")
                 self.assertEqual(inspect.call_count, 1)
                 app.selector.set_query("rtk")
