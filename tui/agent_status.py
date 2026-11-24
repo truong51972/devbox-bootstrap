@@ -11,6 +11,14 @@ import re
 import shutil
 import subprocess
 
+try:
+    import tomllib
+except ImportError:  # Python 3.10 (Ubuntu 22.04)
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
+
 AGENTS = ("claude", "codex", "copilot", "opencode", "gemini")
 LABELS = {
     "claude": "Claude Code",
@@ -194,6 +202,56 @@ def _opencode_config() -> PluginStatus | None:
     return None
 
 
+def _codex_local_status() -> PluginStatus | None:
+    """Verify the official user-scoped registration without starting Codex.
+
+    A marketplace checkout, receipt or orphaned cache alone is not evidence
+    of an installed plugin. Unknown layouts fall back to the CLI.
+    """
+    if tomllib is None:
+        return None
+    home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+    try:
+        with (home / "config.toml").open("rb") as stream:
+            config = tomllib.load(stream)
+    except (OSError, ValueError, UnicodeError):
+        return None
+    plugins = config.get("plugins")
+    if not isinstance(plugins, dict):
+        return None
+    entry = plugins.get("ponytail@ponytail")
+    if not isinstance(entry, dict):
+        return None
+    enabled = entry.get("enabled", True)
+    if enabled is False:
+        return PluginStatus("codex", "Disabled", "local config",
+                            "Disabled in user config", scope="user")
+    if enabled is not True:
+        return None
+
+    cache = home / "plugins" / "cache" / "ponytail" / "ponytail"
+    try:
+        for version_dir in cache.iterdir():
+            if not version_dir.is_dir():
+                continue
+            for manifest in ("plugin.json", ".codex-plugin/plugin.json"):
+                try:
+                    payload = json.loads((version_dir / manifest).read_text(encoding="utf-8"))
+                except (OSError, ValueError, UnicodeError):
+                    continue
+                if isinstance(payload, dict) and payload.get("name") == "ponytail":
+                    return PluginStatus(
+                        "codex", "Installed", "local config + cache",
+                        "User registration verified; /hooks trust unchecked",
+                        scope="user",
+                    )
+    except OSError:
+        pass
+    # An enabled registration with no known payload is not a successful
+    # verification; let the CLI try other supported layouts.
+    return None
+
+
 def _diagnostic(value: str | None) -> str:
     # Keep the reason short, single-line and safe for terminal rendering.
     line = " ".join(_ANSI.sub("", value or "").split())
@@ -203,6 +261,10 @@ def _diagnostic(value: str | None) -> str:
 def probe_agent_detail(agent: str) -> PluginStatus:
     if agent not in _COMMANDS or not shutil.which(agent):
         return PluginStatus(agent, "Unavailable", "PATH", "CLI not found")
+    if agent == "codex":
+        local = _codex_local_status()
+        if local is not None:
+            return local
     command = _COMMANDS[agent]
     reason = ""
     for attempt in range(2):
@@ -215,6 +277,10 @@ def probe_agent_detail(agent: str) -> PluginStatus:
         except subprocess.TimeoutExpired:
             reason = f"Inventory timed out after {_TIMEOUT}s"
             if attempt == 0:
+                # Limit Codex discovery to Ponytail on the second attempt.
+                # A scoped negative result is not a complete inventory.
+                if agent == "codex":
+                    command = (*_COMMANDS[agent], "--marketplace", "ponytail")
                 continue
             break
         except (OSError, UnicodeError) as exc:
@@ -222,10 +288,17 @@ def probe_agent_detail(agent: str) -> PluginStatus:
             break
         if result.returncode != 0:
             detail = _diagnostic(getattr(result, "stderr", "") or result.stdout)
+            if (agent == "copilot" and result.returncode == 127
+                    and "github copilot cli was not found" in detail.lower()):
+                return PluginStatus(agent, "Unavailable", "CLI launcher",
+                                    "Copilot CLI not installed")
             reason = f"Inventory exit {result.returncode}" + (f": {detail}" if detail else "")
             break
         state = (_from_json(agent, result.stdout) if agent in ("claude", "codex", "copilot")
                  else _from_text(result.stdout, gemini=agent == "gemini"))
+        if agent == "codex" and command != _COMMANDS[agent] and state == "Missing":
+            reason = "Full inventory timed out; Ponytail marketplace has no match"
+            break
         if state != "Unverified":
             reason = {"Installed": "Plugin registered; runtime loading not checked",
                       "Disabled": "Plugin is disabled",
