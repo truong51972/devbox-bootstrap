@@ -115,13 +115,14 @@ doctor_main() {
     [[ -x "$inventory_python" ]] || inventory_python=python3
     if command -v "$inventory_python" >/dev/null 2>&1; then
         if ! (cd "$SCRIPT_DIR" && "$inventory_python" -m tui.rtk_status); then
-            warn 'RTK inventory could not run.'
+            warn 'RTK binary verification failed.'
+            problems=$((problems+1))
         fi
         if ! (cd "$SCRIPT_DIR" && "$inventory_python" -m tui.agent_status); then
             warn 'Ponytail inventory could not run; activation remains unverified.'
         fi
     else
-        warn 'Ponytail inventory requires Python 3.'
+        warn 'RTK/Ponytail inventory requires Python 3.'
     fi
 
     if (( problems > 0 )); then
