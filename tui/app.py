@@ -32,6 +32,7 @@ from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, installed, inve
 from tui.agent_status import AGENTS, LABELS, discover_agents, probe_agent_detail as probe_agent, PluginStatus, summary as ponytail_summary
 from tui.rtk_status import RtkInventory, inspect_rtk, executable_path as rtk_executable_path
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
+from tui.semantic import SemanticLexer, FragmentLexer, log_fragments, report_fragments
 from tui.update_check import UpdateCheck, check_update
 from tui.views import DevboxViews, WIDE_LAYOUT_MIN, SPLIT_SPACING, detail_panel_width
 from tui.tasks import BackgroundTasks
@@ -204,29 +205,30 @@ class DevboxTUI(DevboxViews):
         self.history_reports = {}
         self.log_files = self._make_log_list([])
         self.status_view = TextArea(
-            text="", read_only=True, focusable=True, scrollbar=True,
+            lexer=SemanticLexer("report"), text="", read_only=True, focusable=True, scrollbar=True,
             wrap_lines=False,
         )
         self.log_view = TextArea(
-            text="", read_only=True, focusable=False, scrollbar=True,
+            lexer=SemanticLexer("log"), text="", read_only=True, focusable=False, scrollbar=True,
             wrap_lines=False,
         )
         self.status_view.window.height = Dimension(weight=3, min=6)
         self.log_view.window.height = Dimension(weight=2, min=5)
         self.results_view = TextArea(
-            text="", read_only=True, focusable=True, scrollbar=True,
+            lexer=SemanticLexer("result"), text="", read_only=True, focusable=True, scrollbar=True,
             wrap_lines=True,
         )
         self.history_view = TextArea(
-            text="", read_only=True, focusable=True, scrollbar=True,
+            lexer=SemanticLexer("log"), text="", read_only=True, focusable=True, scrollbar=True,
             wrap_lines=False,
         )
         self.help_view = TextArea(
             text=HELP, read_only=True, focusable=True, scrollbar=True,
             wrap_lines=False,
         )
+        self.info_lexer = FragmentLexer()
         self.info_view = TextArea(
-            text="", read_only=True, focusable=True, scrollbar=True,
+            lexer=self.info_lexer, text="", read_only=True, focusable=True, scrollbar=True,
             wrap_lines=True,
         )
         self.filter_input = TextArea(
@@ -309,10 +311,10 @@ class DevboxTUI(DevboxViews):
         if result is None:
             return [("class:muted", "  No update pending.")]
         return [
-            ("class:title", "  A new Devbox revision is available.\n\n"),
-            ("class:body", f"  Installed: {result.current[:12]}\n"
-                           f"  Latest:    {result.latest[:12]}\n"
-                           f"  New commits: {result.commits}\n\n"),
+            ("class:warning", "  A new Devbox revision is available.\n\n"),
+            ("class:body", "  Installed: "), ("class:installed", f"{result.current[:12]}\n"),
+            ("class:body", "  Latest:    "), ("class:running", f"{result.latest[:12]}\n"),
+            ("class:warning", f"  New commits: {result.commits}\n\n"),
             ("class:muted", "  Yes updates source and runtime, then exits.\n"
                             "  Run devbox again to load the new version.\n"
                             "  No continues with the installed version.\n"),
@@ -619,8 +621,10 @@ class DevboxTUI(DevboxViews):
             ("class:running" if done < total else "class:checked",
              f"  {'Scanning' if done < total else 'Scan complete'} "
              f"[{'#' * filled}{'.' * (width - filled)}] {done}/{total}\n"),
-            ("class:body", f"  Ready {ready} | Selected {len(selected)} ({manual} manual)"
-             + (f" | All safe: {pending} pending" if pending else
+            ("class:installed", f"  Ready {ready}"),
+            ("class:body", f" | Selected {len(selected)} ("),
+            ("class:warning" if manual else "class:muted", f"{manual} manual"),
+            ("class:body", ")" + (f" | All safe: {pending} pending" if pending else
                 " | All safe selected" if self.cleaner_all_requested else " | a = All safe") + "\n"),
         ]
 
@@ -634,13 +638,13 @@ class DevboxTUI(DevboxViews):
             ("class:title", item.label + "\n"),
             ("class:checked" if item.key in SAFE_KEYS else "class:warning", risk + "\n\n"),
             ("class:body", item.description + "\n\n"),
-            ("class:running" if row is None else "class:body",
+            ("class:running" if row is None else "class:installed" if row.available else "class:muted",
              "Checking availability and size..." if row is None else
              (f"{'Engine category estimate' if item.key.startswith('docker-') else 'Cache estimate'}: {row.estimate}\n" if row.available else "Unavailable\n") + row.note),
         ]
 
     def _show_cleaner_info(self) -> None:
-        self.info_view.text = "".join(text for _, text in self._cleaner_details())
+        self.info_view.text = self.info_lexer.set_fragments(self._cleaner_details())
         self.navigate("cleaner_info", self.info_view)
 
     def confirm_cleaners(self) -> None:
@@ -852,21 +856,26 @@ class DevboxTUI(DevboxViews):
         except OSError:
             size, mtime_ns = 0, 0
         report = self.history_reports.get(path)
-        summary = (f"  {report.heading} | {report.duration:.1f}s\n  {summarize_status(report.status)}\n" if report else "  Legacy log (no structured report)\n")
+        summary = ([("class:body", "  "),
+                    (STATUS_STYLES.get(report.heading, "class:body"), report.heading),
+                    ("class:muted", f" | {report.duration:.1f}s\n"),
+                    *report_fragments(f"  Duration: {report.duration:.1f}s | {summarize_status(report.status)}")[1:]]
+                   if report else [("class:muted", "  Legacy log (no structured report)")])
+        preview = _cached_log_tail(str(path), size, mtime_ns)
+        output = [fragment for line in preview.split("\n")
+                  for fragment in log_fragments("  " + line) + [("class:body", "\n")]]
         return [
             ("class:section", "  SELECTED RUN\n\n"),
-            ("class:body", summary),
+            *summary, ("class:body", "\n"),
             ("class:title", "  " + item.label + "\n\n"),
             ("class:muted", f"  Size: {size:,} bytes\n"),
             ("class:muted", "  " + str(path) + "\n\n"),
             ("class:section", "  LAST OUTPUT\n"),
-            ("class:body", "  " + _cached_log_tail(
-                str(path), size, mtime_ns
-            ).replace("\n", "\n  ")),
+            *output,
         ]
 
     def _show_component_info(self) -> None:
-        self.info_view.text = "".join(text for _style, text in self._component_details(full=True))
+        self.info_view.text = self.info_lexer.set_fragments(self._component_details(full=True))
         self.navigate("info", self.info_view)
 
     def _begin_filter(self) -> None:
