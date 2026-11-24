@@ -33,7 +33,8 @@ from tui.backend import (
 from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, installed, inventory, with_dependencies
 from tui.agent_status import AGENTS, LABELS, discover_agents, probe_agent, summary as ponytail_summary
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
-from tui.cleaner import BY_KEY as CLEANER_ITEMS, SAFE_KEYS, scan as scan_cleaners
+from tui.cleaner import (BY_KEY as CLEANER_ITEMS, SAFE_KEYS, PROBE_GROUPS,
+                         PROBE_CONCURRENCY, Scan, probe_group)
 
 FINISHED_STATES = FINAL_STATES
 # Stable width across Home, Components and History; remaining columns go to the list.
@@ -169,6 +170,9 @@ class DevboxTUI:
 
         self.menu = self._make_menu()
         self.selector = self._make_selector()
+        self.cleaner_rows: dict[str, Scan] = {}
+        self.cleaner_scan_task: asyncio.Task[None] | None = None
+        self.cleaner_scan_generation = 0
         self.cleaner_list = self._make_cleaner_list()
         self.options = self._make_options([])
         self.log_files = self._make_log_list([])
@@ -372,53 +376,120 @@ class DevboxTUI:
             [], multiple=True, bulk_allowed=lambda entry: entry.key in SAFE_KEYS,
             on_enter=self.confirm_cleaners, on_back=self.back, on_help=self._show_help,
             on_change=self._invalidate, on_refresh=self.open_cleaner,
-            empty_text="Scanning or no available cleaners. Press r to rescan.",
-            get_columns=self._component_list_width,
+            on_details=self._show_cleaner_info, get_columns=self._component_list_width,
         )
+
+    def _cleaner_entries(self) -> None:
+        # Stable order and cursor: never rebuild the widget as results arrive.
+        entries = []
+        for key, item in CLEANER_ITEMS.items():
+            row = self.cleaner_rows.get(key)
+            risk = "SAFE" if key in SAFE_KEYS else "MANUAL"
+            status = "Checking..." if row is None else row.estimate if row.available else "Unavailable"
+            entries.append(Entry(
+                key, item.label, item.group, f"{risk} | {status}",
+                item.description, selectable=row is not None and row.available,
+            ))
+        self.cleaner_list.entries = entries
+        self.cleaner_list.selected.intersection_update(
+            entry.key for entry in entries if entry.selectable
+        )
+        self._invalidate()
+
+    def _cancel_cleaner_scan(self) -> None:
+        self.cleaner_scan_generation += 1
+        if self.cleaner_scan_task is not None and not self.cleaner_scan_task.done():
+            self.cleaner_scan_task.cancel()
+        self.cleaner_scan_task = None
 
     def open_cleaner(self) -> None:
         if self.busy:
             return
+        if self.cleaner_scan_task is not None and not self.cleaner_scan_task.done():
+            self._notice("Scan already running. Ready items can be selected; Esc returns home.")
+            return
         self.action = "clean"
         self.dry_run = True
-        self.cleaner_list.entries = []
+        self.cleaner_rows.clear()
         self.cleaner_list.selected.clear()
-        self.cleaner_list.index = 0
-        self.busy = True
-        self._notice("Scanning known caches (read-only)...")
+        self._cleaner_entries()
+        self._notice("Read-only scan started. Select ready items or press Esc.")
         self.navigate("cleaner", self.cleaner_list.window)
-        self.run_task = asyncio.create_task(self._scan_cleaners())
+        self.cleaner_scan_generation += 1
+        self.cleaner_scan_task = asyncio.create_task(
+            self._scan_cleaners(self.cleaner_scan_generation)
+        )
 
-    async def _scan_cleaners(self) -> None:
-        try:
-            rows = await asyncio.to_thread(scan_cleaners)
-            self.cleaner_list.entries = [
-                Entry(row.key, CLEANER_ITEMS[row.key].label,
-                      CLEANER_ITEMS[row.key].group,
-                      ("SAFE" if row.key in SAFE_KEYS else "MANUAL") + " " + row.estimate,
-                      CLEANER_ITEMS[row.key].description + "\n" + row.note)
-                for row in rows if row.available
-            ]
-            self._notice(f"{len(self.cleaner_list.entries)} available; a = safe only; Space = manual selection.")
-        except Exception as exc:
-            self._notice(f"Scan failed: {exc}")
-        finally:
-            self.busy = False
-            self._invalidate()
+    async def _scan_cleaners(self, generation: int) -> None:
+        limit = asyncio.Semaphore(PROBE_CONCURRENCY)
+
+        async def check(group: str) -> None:
+            try:
+                async with limit:
+                    rows = await probe_group(group)
+            except Exception as exc:
+                reason = "Scan timed out" if isinstance(exc, asyncio.TimeoutError) else str(exc)
+                rows = [Scan(key, False, "-", reason) for key in PROBE_GROUPS[group]]
+            if generation != self.cleaner_scan_generation:
+                return
+            self.cleaner_rows.update((row.key, row) for row in rows)
+            self._cleaner_entries()
+            if self.screen == "cleaner":
+                done = len(self.cleaner_rows)
+                total = len(CLEANER_ITEMS)
+                ready = sum(row.available for row in self.cleaner_rows.values())
+                self._notice(f"{done}/{total} checked | {ready} ready | "
+                             + ("a = All ready safe; r = rescan" if done == total
+                                else "Scanning remaining items..."))
+
+        await asyncio.gather(*(check(group) for group in PROBE_GROUPS))
+
+    def _cleaner_summary(self):
+        done = len(self.cleaner_rows)
+        total = len(CLEANER_ITEMS)
+        ready = sum(row.available for row in self.cleaner_rows.values())
+        selected = self.cleaner_list.current_values
+        manual = sum(key not in SAFE_KEYS for key in selected)
+        width = 12
+        filled = width * done // total
+        return [
+            ("class:running" if done < total else "class:checked",
+             f"  {'Scanning' if done < total else 'Scan complete'} "
+             f"[{'#' * filled}{'.' * (width - filled)}] {done}/{total}\n"),
+            ("class:body", f"  Ready {ready} | Selected {len(selected)} ({manual} manual) | All = ready safe only\n"),
+        ]
 
     def _cleaner_details(self):
         item = self.cleaner_list.current
-        return [("class:body", item.description if item else "No available cleanup item.")]
+        if item is None:
+            return [("class:muted", "No cleanup item.")]
+        row = self.cleaner_rows.get(item.key)
+        risk = "SAFE / regenerable" if item.key in SAFE_KEYS else "MANUAL / explicit consent"
+        return [
+            ("class:title", item.label + "\n"),
+            ("class:checked" if item.key in SAFE_KEYS else "class:warning", risk + "\n\n"),
+            ("class:body", item.description + "\n\n"),
+            ("class:running" if row is None else "class:body",
+             "Checking availability and size..." if row is None else
+             (f"Estimate: {row.estimate}\n" if row.available else "Unavailable\n") + row.note),
+        ]
+
+    def _show_cleaner_info(self) -> None:
+        self.info_view.text = "".join(text for _, text in self._cleaner_details())
+        self.navigate("cleaner_info", self.info_view)
 
     def _cleaner_layout(self):
+        summary = lambda: self._text(self._cleaner_summary, height=2)
         if self.columns() >= 94:
-            return self._layout("cleaner-wide", lambda: VSplit([
-                self.cleaner_list.window, self._divider_v(),
-                self._text(self._cleaner_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
-            ], padding=1))
+            return self._layout("cleaner-wide", lambda: HSplit([
+                summary(), self._divider(), VSplit([
+                    self.cleaner_list.window, self._divider_v(),
+                    self._text(self._cleaner_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
+                ], padding=1),
+            ]))
         return self._layout("cleaner-narrow", lambda: HSplit([
-            self.cleaner_list.window, self._divider(),
-            self._text(self._cleaner_details, height=5),
+            summary(), self._divider(), self.cleaner_list.window, self._divider(),
+            self._text(self._cleaner_details, height=6),
         ]))
 
     def confirm_cleaners(self) -> None:
@@ -426,7 +497,7 @@ class DevboxTUI:
             return
         self.selected = self.cleaner_list.current_values
         if not self.selected:
-            self._notice("Select at least one cleaner.")
+            self._notice("Select a ready cleaner using Space or a (All ready safe).")
             return
         self.auto_added = []
         self.dry_run = True
@@ -496,6 +567,7 @@ class DevboxTUI:
         compact = {
             "Main menu": "↑↓ Move  Enter Open  t Theme  ? Help  q Quit",
             "Components": "↑↓ Move  Space Toggle  / Filter  i Info  r Refresh  Enter Next",
+            "Cleaner": "Space Toggle  a Safe  n None  i Info  r Scan  Enter Next  Esc",
             "Confirm": "Space Options  d Dry-run  Enter Run  Esc Back",
             "Execution": "l Expand log  Exit locked",
             "Result": "l Log  Enter Home  Esc Back",
@@ -546,8 +618,9 @@ class DevboxTUI:
         )
         self.views["cleaner"] = self._page(
             "Cleaner", DynamicContainer(self._cleaner_layout),
-            "Space Toggle   a All safe   n None   r Rescan   Enter Preview   Esc Back",
+            "Space Toggle   a All safe   n None   i Details   r Rescan   Enter Preview   Esc Back",
         )
+        self.views["cleaner_info"] = self._page("Cleaner details", self.info_view, "Esc Back to Cleaner")
         self.views["confirm"] = self._page(
             "Confirm", DynamicContainer(self._confirm_layout),
             "Space Toggle options   d Dry-run   Enter Execute   Esc Back",
@@ -1057,6 +1130,8 @@ class DevboxTUI:
             self._notice(str(exc))
             return
 
+        # Stop read-only workers before executing any mutating job.
+        self._cancel_cleaner_scan()
         # Reserve the slot before creating a task: rapid Enter cannot overlap APT.
         self.busy = True
         self.current_action = action.title()
@@ -1279,6 +1354,8 @@ class DevboxTUI:
                 self.navigate("home", self.menu.window)
             else:
                 self.navigate("select", self.selector.window)
+        elif self.screen == "cleaner_info":
+            self.navigate("cleaner", self.cleaner_list.window)
         elif self.screen == "info":
             self.navigate("select", self.selector.window)
         elif self.screen in ("select", "logs") and self.filter_active:
@@ -1288,6 +1365,9 @@ class DevboxTUI:
             self._active_list().set_query("")
             self._notice("Filter cleared. Press Esc again to return.")
         elif self.screen in ("select", "result", "logs", "cleaner"):
+            if self.screen == "cleaner":
+                self._cancel_cleaner_scan()
+                self._notice("Returned home. Open Cleaner to scan again.")
             self.navigate("home", self.menu.window)
 
     def _focus_for(self, screen: str):
@@ -1296,13 +1376,14 @@ class DevboxTUI:
             "cleaner": self.cleaner_list.window,
             "confirm": self.options.window, "result": self.results_view,
             "logs": self.log_files.window, "view_log": self.history_view,
-            "run": self.status_view, "info": self.info_view,
+            "run": self.status_view, "info": self.info_view, "cleaner_info": self.info_view,
         }.get(screen, self.help_view)
 
     def quit(self) -> None:
         if self.busy:
             self._notice("Finish the running task before exiting.")
             return
+        self._cancel_cleaner_scan()
         self.app.exit()
 
     def run(self) -> None:

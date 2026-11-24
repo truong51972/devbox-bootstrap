@@ -80,6 +80,7 @@ class Entry:
     group: str = ""
     status: str = ""
     description: str = ""
+    selectable: bool = True
 
 
 class KeyboardList:
@@ -182,10 +183,10 @@ class KeyboardList:
             def _all(_event) -> None:
                 # Preserve selected items hidden by an active filter.
                 if bulk_allowed is None:
-                    self.selected.update(item.key for item in self.visible)
+                    self.selected.update(item.key for item in self.visible if item.selectable)
                 else:
                     # A safe preset replaces prior manual selections, even if hidden.
-                    self.selected = {item.key for item in self.visible if bulk_allowed(item)}
+                    self.selected = {item.key for item in self.visible if item.selectable and bulk_allowed(item)}
                 self.on_change()
 
             @kb.add("n")
@@ -240,7 +241,7 @@ class KeyboardList:
 
     @property
     def current_values(self) -> list[str]:
-        return [entry.key for entry in self.entries if entry.key in self.selected]
+        return [entry.key for entry in self.entries if entry.selectable and entry.key in self.selected]
 
     @current_values.setter
     def current_values(self, values: Sequence[str]) -> None:
@@ -262,7 +263,7 @@ class KeyboardList:
 
     def toggle(self) -> None:
         current = self.current
-        if current is not None:
+        if current is not None and current.selectable:
             if current.key in self.selected:
                 self.selected.remove(current.key)
             else:
@@ -299,9 +300,7 @@ class KeyboardList:
                 last_group = entry.group
 
             active = i == self.index
-            prefix = "[x]" if entry.key in self.selected and self.multiple else (
-                "[ ]" if self.multiple else "   "
-            )
+            prefix = ("[-]" if not entry.selectable else "[x]" if entry.key in self.selected else "[ ]") if self.multiple else "   "
             marker = ">" if active else " "
             start = f" {marker} {prefix} "
             # Never let the status column crowd out the label on narrow panes.
@@ -313,6 +312,7 @@ class KeyboardList:
                 label = label[:max(0, label_width - 1)] + "…"
 
             row_style = ("class:focus" if active else
+                         "class:muted" if not entry.selectable else
                          "class:checked" if entry.key in self.selected else
                          "class:body")
             text = start + label
