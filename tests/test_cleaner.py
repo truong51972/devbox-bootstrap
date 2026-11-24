@@ -85,6 +85,38 @@ class CleanerTests(unittest.TestCase):
         self.assertEqual(main(["--only", "pip-cache", "--dry-run"]), 0)
         scan.assert_not_called()
 
+    def test_cleaner_confirmation_matches_install_and_upgrade(self):
+        app = DevboxTUI()
+        app.action = "clean"
+        app.cleaner_rows = {"pip-cache": Scan("pip-cache", True, "1 MiB", "")}
+        app._cleaner_entries()
+        app.cleaner_list.current_values = ["pip-cache"]
+        app.confirm_cleaners()
+        self.assertFalse(app.dry_run)
+        self.assertIn("Enter Clean", app._confirm_shortcuts())
+        self.assertIn("1 MiB", app.confirm_plan.text)
+        self.assertFalse(app.options.entries)
+        self.assertIs(app._confirm_focus(), app.confirm_plan)
+        self.assertEqual(len(app._confirm_layout().children), 3)
+        app.toggle_dry_run()
+        self.assertIn("Enter Preview", app._confirm_shortcuts())
+        with patch.object(app, "start") as start:
+            app.execute_selection()
+            start.assert_called_once_with("clean", ["pip-cache"])
+
+    def test_manual_consent_is_still_required(self):
+        app = DevboxTUI()
+        app.action = "clean"
+        app.cleaner_rows = {"docker-volumes": Scan("docker-volumes", True, "1 GiB", "")}
+        app._cleaner_entries()
+        app.cleaner_list.current_values = ["docker-volumes"]
+        app.confirm_cleaners()
+        self.assertFalse(app.dry_run)
+        self.assertFalse(app.options.current_values)
+        app.execute_selection()
+        self.assertFalse(app.busy)
+        self.assertIn("acknowledge", app.message.lower())
+
     def test_no_volume_or_tagged_image_in_safe_commands(self):
         for key in SAFE_KEYS:
             command = BY_KEY[key].command

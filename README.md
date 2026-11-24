@@ -36,7 +36,8 @@ after updating source code.
 
 The keyboard-first TUI starts at a **minimal grouped menu**. Install/Upgrade
 opens a sectioned component list with a contextual details panel, then a
-compact confirmation, execution progress, and result screen. The layout adapts
+compact confirmation, execution progress, and result screen. Cleaner uses the same
+confirmation controls and displays only relevant consent/options. The layout adapts
 to wide and narrow terminals (with `i` for details in compact mode). Doctor,
 Preflight, Update Devbox and Logs & History remain separate choices.
 Mouse input is deliberately disabled. No new TUI dependencies are required.
@@ -49,7 +50,8 @@ Mouse input is deliberately disabled. No new TUI dependencies are required.
 | / | Components, History | Search/filter the visible list |
 | I | Components | Full details (useful in narrow terminals) |
 | T | Main menu | Toggle minimal color / monochrome theme |
-| D | Confirmation | Toggle dry-run |
+| D | Confirmation | Toggle dry-run (off by default; not supported for source update) |
+| Tab | Confirmation | Switch between scrollable plan and options, when present |
 | Esc | Idle screens | Back (or clear active filter) |
 | L | Execution, Results | Expand live log / open saved log |
 | O | Log viewer | Open external pager (if installed) |
@@ -218,7 +220,8 @@ and live progress. Slow/unavailable items do not block navigation or selection o
 ready items. Esc cancels the scan when returning home; r starts a new scan after
 completion. Press **a (All safe)** to select only safe currently ready cleaners; this also clears
 any previous manual selection. Space can select a manual item individually.
-Confirmation defaults to dry-run; press d to enable deletion. Manual items
+Like Install and Upgrade, confirmation defaults to applying the selected changes;
+Enter confirms, d switches to dry-run (no changes). Manual items
 require a separate acknowledgement. No cleanup runs merely by opening Cleaner.
 
 ```bash
