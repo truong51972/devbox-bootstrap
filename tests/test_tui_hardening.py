@@ -26,7 +26,7 @@ class ContractTests(unittest.TestCase):
         upgrade = (ROOT / "utils/upgrade.sh").read_text()
         codes = re.findall(r"^\s*run_component ([a-z0-9-]+) ", install, re.M)
         self.assertEqual([code for code in codes if code != "clean"], list(ORDER))
-        order = re.search(r"for component in (.*?)\; do", upgrade).group(1).split()
+        order = re.search(r"^    for component in ([a-z0-9 -]+); do$", upgrade, re.M).group(1).split()
         self.assertEqual(order, list(ORDER))
 
     def test_report_round_trip_and_old_log(self):
