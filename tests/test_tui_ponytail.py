@@ -80,6 +80,59 @@ class PonytailStatusTests(unittest.TestCase):
             agent_status._from_text("✓ ponytail\n", gemini=True), "Unverified"
         )
 
+    def test_gemini_flags_do_not_leak_between_records(self):
+        output = ("✓ ponytail (5.0)\n"
+                  "  Enabled (User): false\n"
+                  "  Enabled (Workspace): false\n"
+                  "✓ another-extension (1.0)\n"
+                  "  Enabled (User): true\n"
+                  "  Enabled (Workspace): true\n")
+        self.assertEqual(agent_status._from_text(output, gemini=True), "Disabled")
+
+    def test_unknown_inventory_and_exact_identity(self):
+        self.assertEqual(agent_status._from_text(""), "Unverified")
+        self.assertEqual(agent_status._from_text("Warning: ponytail is available"), "Unverified")
+        self.assertEqual(agent_status._from_json("codex", '{"installed":[{}]}'), "Unverified")
+        self.assertEqual(agent_status._from_json("codex", '{"installed":[{"id":"other@ponytail"}]}'), "Missing")
+        self.assertEqual(agent_status._from_json("claude", '[{"id":"ponytail@ponytail","enabled":"false"}]'), "Unverified")
+
+    def test_diagnostics_and_retry(self):
+        import subprocess
+        with patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
+             patch("tui.agent_status.subprocess.run", side_effect=[
+                 subprocess.TimeoutExpired("codex", 6),
+                 SimpleNamespace(returncode=0, stdout='{"installed":[{"id":"ponytail@ponytail"}]}'),
+             ]) as run:
+            result = agent_status.probe_agent_detail("codex")
+            self.assertEqual(result.state, "Installed")
+            self.assertEqual(run.call_count, 2)
+        with patch("tui.agent_status.shutil.which", return_value="/bin/codex"), \
+             patch("tui.agent_status.subprocess.run", return_value=SimpleNamespace(
+                 returncode=2, stdout="", stderr="unsupported --json"
+             )):
+            result = agent_status.probe_agent_detail("codex")
+            self.assertEqual(result.state, "Unverified")
+            self.assertIn("unsupported --json", result.reason)
+
+    def test_legacy_opencode_config(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as temp, \
+             patch.dict(os.environ, {"XDG_CONFIG_HOME": temp, "OPENCODE_CONFIG": ""}), \
+             patch("tui.agent_status.shutil.which", return_value="/bin/opencode"), \
+             patch("tui.agent_status.subprocess.run", return_value=SimpleNamespace(
+                 returncode=1, stdout="", stderr="unknown command"
+             )):
+            config = Path(temp) / "opencode"
+            config.mkdir()
+            (config / "opencode.jsonc").write_text(
+                '{// comment\n"plugin":["@dietrichgebert/ponytail@latest",],}', encoding="utf-8"
+            )
+            result = agent_status.probe_agent_detail("opencode")
+            self.assertEqual(result.state, "Installed")
+            self.assertEqual(result.source, "local config")
+
     def test_discovery_lists_all_agents_without_receipts(self):
         detected = {"claude", "codex", "opencode"}
         with patch("tui.agent_status.shutil.which",
@@ -151,7 +204,7 @@ class PonytailStatusTests(unittest.TestCase):
         def slow_probe(agent):
             calls.append(agent)
             time.sleep(0.25)
-            return "Installed" if agent == "claude" else "Missing"
+            return agent_status.PluginStatus(agent, "Installed" if agent == "claude" else "Missing", "test", "fixture")
 
         async def scenario():
             with patch("tui.app.discover_agents", side_effect=lambda: detected.copy()), \
@@ -198,7 +251,7 @@ class PonytailStatusTests(unittest.TestCase):
 
         def delayed_agent(_agent):
             time.sleep(0.15)
-            return "Installed"
+            return agent_status.PluginStatus(_agent, "Installed", "test", "fixture")
 
         async def scenario():
             with patch("tui.app.discover_agents",
@@ -228,10 +281,10 @@ class PonytailStatusTests(unittest.TestCase):
         }
         async def scenario():
             with patch("tui.app.discover_agents", return_value=discovered.copy()), \
-                 patch("tui.app.probe_agent", side_effect=lambda agent: {
+                 patch("tui.app.probe_agent", side_effect=lambda agent: agent_status.PluginStatus(agent, {
                      "claude": "Installed", "codex": "Installed",
                      "copilot": "Missing",
-                 }[agent]), \
+                 }[agent], "test", "fixture")), \
                  patch("tui.app.installed", return_value=False):
                 app = DevboxTUI()
                 app.open_menu()

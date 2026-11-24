@@ -29,7 +29,7 @@ from tui.backend import (
     read_events, read_run_events,
 )
 from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, installed, inventory, with_dependencies
-from tui.agent_status import AGENTS, LABELS, discover_agents, probe_agent, summary as ponytail_summary
+from tui.agent_status import AGENTS, LABELS, discover_agents, probe_agent_detail as probe_agent, PluginStatus, summary as ponytail_summary
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
 from tui.update_check import UpdateCheck, check_update
 from tui.views import DevboxViews, DETAIL_PANEL_WIDTH
@@ -154,6 +154,7 @@ class DevboxTUI(DevboxViews):
         self.auto_added: list[str] = []
         # Discovery is PATH-only. No external CLI runs during TUI construction.
         self.ponytail_agents = discover_agents()
+        self.ponytail_details: dict[str, PluginStatus] = {}
         self.available = inventory(self.ponytail_agents, quick=True)
         self._agent_scan_task: asyncio.Task[None] | None = None
         self._agent_scan_completed_at = 0.0
@@ -378,6 +379,7 @@ class DevboxTUI(DevboxViews):
         """Discard in-flight state after an installer may change plugins."""
         self._agent_scan_generation += 1
         self._agent_scan_completed_at = 0.0
+        self.ponytail_details.clear()
         self.component_metadata = {}
         if self._agent_scan_task is not None and not self._agent_scan_task.done():
             self.tasks.cancel("agents")
@@ -390,10 +392,13 @@ class DevboxTUI(DevboxViews):
                 self._notice("Agent status check already running.")
             return
         if (not force and self._agent_scan_completed_at
-                and time.monotonic() - self._agent_scan_completed_at < self.AGENT_SCAN_TTL):
+                and time.monotonic() - self._agent_scan_completed_at < (
+                    10.0 if "Unverified" in self.ponytail_agents.values()
+                    else self.AGENT_SCAN_TTL)):
             return
 
         self.ponytail_agents = discover_agents()
+        self.ponytail_details.clear()
         self._set_component_status("ponytail", ponytail_summary(self.ponytail_agents))
         self._set_component_status(
             "rtk", "Unverified" if shutil.which("rtk") or
@@ -413,12 +418,13 @@ class DevboxTUI(DevboxViews):
         """Run bounded blocking checks concurrently in worker threads."""
         async def check_agent(agent: str) -> None:
             try:
-                state = await asyncio.to_thread(probe_agent, agent)
-            except Exception:
-                state = "Unverified"
+                result = await asyncio.to_thread(probe_agent, agent)
+            except Exception as exc:
+                result = PluginStatus(agent, "Unverified", "inventory", type(exc).__name__)
             if generation != self._agent_scan_generation:
                 return
-            self.ponytail_agents[agent] = state
+            self.ponytail_details[agent] = result
+            self.ponytail_agents[agent] = result.state
             self._set_component_status("ponytail", ponytail_summary(self.ponytail_agents))
 
         async def check_rtk() -> None:
@@ -732,7 +738,10 @@ class DevboxTUI(DevboxViews):
                     ("class:muted", f"  {LABELS[agent]:<12} "),
                     (STATUS_STYLES.get(state, "class:body"), state + "\n"),
                 ])
-            out.append(("class:muted", "  r to refresh · CLI inventory only\n\n"))
+                detail = self.ponytail_details.get(agent)
+                if detail:
+                    out.append(("class:muted", f"    {detail.source}: {detail.reason}\n"))
+            out.append(("class:muted", "  r to refresh · registration, not runtime activation\n\n"))
         out.extend([
             ("class:section", "  OVERVIEW\n"),
             ("class:muted", "  State: "),
