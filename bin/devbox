@@ -5,8 +5,10 @@ script="$(readlink -f -- "${BASH_SOURCE[0]}")"
 root="$(cd -- "$(dirname -- "$script")/.." && pwd)"
 venv="$root/.venv"
 upstream='https://github.com/truong51972/devbox-bootstrap.git'
+# shellcheck source=utils/operation-lock.sh
+source "$root/utils/operation-lock.sh"
 
-setup_runtime() {
+install_runtime() {
     local python="$venv/bin/python" requirements="$root/tui/requirements.txt"
 
     local uv_binary=''
@@ -31,7 +33,7 @@ setup_runtime() {
             echo "[devbox] uv did not create a usable interpreter: $python" >&2
             return 1
         fi
-        "$uv_binary" pip install --python "$python" -r "$requirements"
+        timeout 300 "$uv_binary" pip install --python "$python" -r "$requirements"
         return $?
     fi
 
@@ -55,16 +57,55 @@ setup_runtime() {
         echo '[devbox] pip is missing inside the virtual environment. Repair Python venv/ensurepip or install uv.' >&2
         return 1
     fi
-    "$python" -m pip install --disable-pip-version-check --no-input \
+    timeout 300 "$python" -m pip install --disable-pip-version-check --no-input \
         -r "$requirements"
 }
 
+runtime_fingerprint() {
+    local digest
+    digest="$(sha256sum "$root/tui/requirements.txt")" || return 1
+    printf 'runtime-v1:%s\n' "${digest%% *}"
+}
+
+runtime_ready() {
+    local expected
+    expected="$(runtime_fingerprint)" || return 1
+    [[ -x "$venv/bin/python" && -f "$venv/.devbox-runtime" &&
+        "$(cat "$venv/.devbox-runtime")" == "$expected" ]] &&
+        "$venv/bin/python" -c 'import prompt_toolkit' 2>/dev/null
+}
+
+setup_runtime() {
+    devbox_acquire_lock || return 1
+    if runtime_ready; then return 0; fi
+    local expected stamp
+    expected="$(runtime_fingerprint)" || return 1
+    rm -f -- "$venv/.devbox-runtime"
+    if ! install_runtime || ! "$venv/bin/python" -c 'import prompt_toolkit' ||
+       [[ "$(runtime_fingerprint)" != "$expected" ]]; then
+        echo 'Runtime setup incomplete. Run devbox --setup-runtime to retry.' >&2
+        return 1
+    fi
+    stamp="$(mktemp "$venv/.devbox-runtime.XXXXXX")" || return 1
+    if ! printf '%s\n' "$expected" > "$stamp" || ! mv -f -- "$stamp" "$venv/.devbox-runtime"; then
+        rm -f -- "$stamp"
+        return 1
+    fi
+}
+
 update_code() {
+    local expected="${1:-}"
+    if [[ -n "$expected" && ! "$expected" =~ ^[0-9a-f]{40}$ ]]; then
+        echo 'Invalid expected update revision.' >&2
+        return 1
+    fi
+    devbox_acquire_lock || return 1
+
     if [[ ! -d "$root/.git" ]]; then
         echo "Not a Git checkout: $root" >&2
         return 1
     fi
-    local origin branch
+    local origin branch target current
     origin="$(git -C "$root" remote get-url origin)"
     case "$origin" in
         "$upstream"|https://github.com/truong51972/devbox-bootstrap|git@github.com:truong51972/devbox-bootstrap.git)
@@ -83,11 +124,25 @@ update_code() {
         return 1
     fi
     # Only fast-forward: never reset local source or force overwrite user edits.
-    git -C "$root" fetch --no-tags origin main
-    git -C "$root" merge --ff-only FETCH_HEAD
+    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" \
+        timeout 60 git -C "$root" fetch --no-tags --no-recurse-submodules --no-write-fetch-head origin +refs/heads/main:refs/devbox/update
+    target="$(git -C "$root" rev-parse refs/devbox/update)"
+    current="$(git -C "$root" rev-parse HEAD)"
+    if [[ -n "$expected" && "$target" != "$expected" ]]; then
+        echo "Upstream changed after confirmation; reopen Devbox to review the new revision." >&2
+        return 1
+    fi
+    if ! git -C "$root" merge-base --is-ancestor "$current" "$target"; then
+        echo "Refusing update: local history is ahead or diverged." >&2
+        return 1
+    fi
+    git -C "$root" merge --ff-only "$target"
     # Run the runtime bootstrap from the freshly updated launcher, rather than
     # reusing a function loaded from an older script before the Git update.
-    bash "$root/bin/devbox" --setup-runtime
+    if ! bash "$root/bin/devbox" --setup-runtime; then
+        echo "Source updated, but runtime is not ready. Run devbox --setup-runtime to recover." >&2
+        return 1
+    fi
     printf 'Devbox code is current: %s\n' "$(git -C "$root" rev-parse --short HEAD)"
     echo 'Restart the TUI to load updated Python code.'
 }
@@ -111,7 +166,8 @@ HELP
     --version)
         git -C "$root" rev-parse --short HEAD ;;
     --update)
-        update_code ;;
+        if (( $# > 2 )); then echo "Usage: devbox --update [expected-revision]" >&2; exit 2; fi
+        update_code "${2:-}" ;;
     --setup-runtime)
         setup_runtime ;;
     '')
@@ -119,8 +175,13 @@ HELP
             echo "The TUI requires an interactive terminal. Use 'devbox --doctor' or 'devbox --help'." >&2
             exit 1
         fi
-        if [[ ! -x "$venv/bin/python" ]] || ! "$venv/bin/python" -c 'import prompt_toolkit' 2>/dev/null; then
+        if ! runtime_ready; then
             setup_runtime
+        fi
+        if [[ -n "${DEVBOX_LOCK_FD:-}" ]]; then
+            fd="$DEVBOX_LOCK_FD"
+            exec {fd}>&-
+            unset DEVBOX_LOCK_FD
         fi
         cd "$root"
         exec "$venv/bin/python" -m tui.app ;;

@@ -4,6 +4,8 @@
 
 doctor_main() {
     local problems=0 rc zsh_rc
+    # Bound each read-only native probe, including unresponsive Docker contexts.
+    doctor_probe() { timeout --kill-after=1 5 "$@"; }
     log 'Devbox Health Check'
     zsh_rc="$(zsh_rc_file)"
     case "${BOOTSTRAP_TARGET_SHELL:-${SHELL##*/}}" in
@@ -58,9 +60,9 @@ doctor_main() {
     if command -v keychain >/dev/null 2>&1; then doctor_hook keychain '# Keychain setup'; fi
 
     if command -v docker >/dev/null 2>&1; then
-        if docker info >/dev/null 2>&1; then
+        if doctor_probe docker info >/dev/null 2>&1; then
             log '[OK]   Docker: daemon reachable'
-            if docker compose version >/dev/null 2>&1; then
+            if doctor_probe docker compose version >/dev/null 2>&1; then
                 log '[OK]   Docker Compose: available'
             else
                 warn '[!!]   Docker Compose: unavailable'
@@ -76,8 +78,8 @@ doctor_main() {
 
     if command -v nvidia-ctk >/dev/null 2>&1; then
         log '[OK]   NVIDIA Container Toolkit: installed'
-        if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-            if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"'; then
+        if command -v docker >/dev/null 2>&1 && doctor_probe docker info >/dev/null 2>&1; then
+            if doctor_probe docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"'; then
                 log '[OK]   NVIDIA Docker runtime: registered'
             else
                 warn '[!!]   NVIDIA Docker runtime: not registered'
@@ -86,7 +88,7 @@ doctor_main() {
         else
             warn '[--]   NVIDIA Docker runtime: cannot inspect without a running Docker daemon'
         fi
-        if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+        if command -v nvidia-smi >/dev/null 2>&1 && doctor_probe nvidia-smi >/dev/null 2>&1; then
             log '[OK]   NVIDIA host utilities: GPU reachable'
         else
             warn '[--]   NVIDIA host utilities: no reachable GPU detected'
@@ -97,7 +99,7 @@ doctor_main() {
     fi
 
     if command -v kubectl >/dev/null 2>&1; then
-        if kubectl version --client >/dev/null 2>&1; then
+        if doctor_probe kubectl version --client >/dev/null 2>&1; then
             log '[OK]   kubectl: client responds (cluster connection not tested)'
         else
             warn '[!!]   kubectl: client failed'
@@ -114,7 +116,7 @@ doctor_main() {
         rtk_exe="$HOME/.local/bin/rtk"
     fi
     if [[ -n "$rtk_exe" ]]; then
-        if "$rtk_exe" gain >/dev/null 2>&1; then
+        if doctor_probe "$rtk_exe" gain >/dev/null 2>&1; then
             log "[OK]   RTK: rtk-ai token optimizer available ($rtk_exe)"
             log '[NOTE] RTK agent hook integration is not verified by Doctor.'
         else

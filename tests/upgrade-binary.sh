@@ -3,7 +3,8 @@ set -Eeuo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 temp="$(mktemp -d)"
 trap 'rm -rf -- "$temp"' EXIT
-mkdir -p "$temp/bin"
+export HOME="$temp/home"
+mkdir -p "$temp/bin" "$HOME"
 export MOCK_LOG="$temp/sudo.log"
 export BOOTSTRAP_DRY_RUN=0
 cat > "$temp/bin/sudo" <<'MOCK'
@@ -59,6 +60,7 @@ command() {
         builtin command "$@"
     fi
 }
+managed_binary_matches() { return 0; }
 UPGRADE_CHANGED=0
 upgrade_binary kubectl v1.38.0 https://example.test/kubectl v1.37.0
 [[ "$UPGRADE_CHANGED" -eq 1 ]]
@@ -83,10 +85,24 @@ if bash -c '
             builtin command "$@"
         fi
     }
+    managed_binary_matches() { return 0; }
     upgrade_binary kubectl v1.38.0 https://example.test/kubectl v1.37.0
 ' bash "$repo_dir" >/dev/null 2>&1; then
     echo 'Upgrade installed a binary with a bad checksum' >&2
     exit 1
 fi
 [[ ! -s "$MOCK_LOG" ]]
+unset -f managed_binary_matches
+# shellcheck source=utils/utils.sh
+source "$repo_dir/utils/utils.sh"
+artifact="$temp/artifact"
+printf 'owned' > "$artifact"
+chmod +x "$artifact"
+! managed_binary_matches kubectl "$artifact"
+record_managed_binary kubectl "$artifact"
+managed_binary_matches kubectl "$artifact"
+printf 'changed' >> "$artifact"
+! managed_binary_matches kubectl "$artifact"
+! trusted_github_origin 'https://evil.example/romkatv/powerlevel10k' romkatv/powerlevel10k
+trusted_github_origin 'https://github.com/romkatv/powerlevel10k.git' romkatv/powerlevel10k
 printf 'Upgrade checksum tests passed.\n'

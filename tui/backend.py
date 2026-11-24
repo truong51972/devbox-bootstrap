@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 
 from tui.catalog import COMPONENTS
@@ -17,7 +18,8 @@ AGENTS = ("claude", "codex", "copilot", "opencode", "gemini")
 
 def build_command(action: str, selected: list[str], *, dry_run: bool = False,
                   agents: list[str] | None = None, allow_risky: bool = False,
-                  resources: list[str] | None = None, docker_endpoint: str = "") -> list[str]:
+                  resources: list[str] | None = None, docker_endpoint: str = "",
+                  update_revision: str = "") -> list[str]:
     if action == "clean":
         if not selected or len(set(selected)) != len(selected) or any(k not in BY_KEY for k in selected):
             raise ValueError("Select valid cleanup items.")
@@ -38,7 +40,10 @@ def build_command(action: str, selected: list[str], *, dry_run: bool = False,
                 cmd.append("--allow-risky")
         return cmd
     if action == "update":
-        return ["bash", str(ROOT / "bin/devbox"), "--update"]
+        command = ["bash", str(ROOT / "bin/devbox"), "--update"]
+        if update_revision:
+            command.append(update_revision)
+        return command
     if action in {"doctor", "preflight"}:
         return ["bash", str(ROOT / "setup-ubuntu.sh"), f"--{action}"]
     if action not in {"install", "upgrade"}:
@@ -51,7 +56,7 @@ def build_command(action: str, selected: list[str], *, dry_run: bool = False,
     if action == "install" and "ponytail" in selected and not targets:
         raise ValueError("Select at least one agent target for Ponytail.")
     allowed = {code for code, _ in COMPONENTS}
-    if not selected or any(item not in allowed for item in selected):
+    if not selected or len(set(selected)) != len(selected) or any(item not in allowed for item in selected):
         raise ValueError("Select at least one valid component.")
     cmd = ["bash", str(ROOT / "setup-ubuntu.sh")]
     if action == "upgrade":
@@ -65,7 +70,7 @@ def build_command(action: str, selected: list[str], *, dry_run: bool = False,
 
 
 def log_tail(path: Path | None, count: int = 14, *, max_bytes: int = 65536) -> str:
-    if path is None or not path.is_file():
+    if path is None or not path.is_file() or path.is_symlink():
         return "No output yet."
     with path.open("rb") as stream:
         stream.seek(0, os.SEEK_END)
@@ -94,8 +99,14 @@ def log_preview(path: Path, *, max_bytes: int = 1024 * 1024) -> str:
 
 
 def read_events(path: Path | None, offset: int) -> tuple[list[tuple[str, str]], int]:
+    events, _, offset = read_run_events(path, offset)
+    return events, offset
+
+
+def read_run_events(path: Path | None, offset: int):
     if path is None or not path.is_file():
-        return [], offset
+        return [], [], offset
+    details = []
     events: list[tuple[str, str]] = []
     with path.open("rb") as stream:
         stream.seek(0, os.SEEK_END)
@@ -106,8 +117,15 @@ def read_events(path: Path | None, offset: int) -> tuple[list[tuple[str, str]], 
             line = stream.readline()
             if not line or not line.endswith(b"\n"):
                 break
-            fields = line.decode("utf-8", errors="replace").strip().split("\t")
+            fields = line.decode("utf-8", errors="replace").rstrip("\r\n").split("\t", 2)
             if len(fields) == 3 and fields[0] == "STATUS" and all(fields[1:]):
                 events.append((fields[1], fields[2]))
+            elif len(fields) == 3 and fields[0] == "DETAIL":
+                try:
+                    detail = json.loads(fields[2])
+                    if isinstance(detail, str):
+                        details.append((fields[1], detail[:1000]))
+                except ValueError:
+                    pass
             offset = stream.tell()
-    return events, offset
+    return events, details, offset

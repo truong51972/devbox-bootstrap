@@ -41,7 +41,7 @@ another view, the prompt waits until you return to the main menu.
 Both startup Yes and **Update Devbox source** exit the TUI only after source
 and runtime update succeed. The terminal shows the outcome and log path;
 run devbox again to load the new revision. Failures remain in the Result view.
-Set DEVBOX_CHECK_UPDATES=0 to disable the startup check. CLI --update is unchanged.
+Set DEVBOX_CHECK_UPDATES=0 to disable the startup check. Startup confirmation pins the offered revision; if upstream changes, reopen Devbox and review again. The runtime dependency fingerprint is checked on launch and repaired if stale. If source updates but runtime setup fails, run `devbox --setup-runtime` to recover (no destructive Git reset). Mutating Devbox operations share a nonblocking per-user lock across CLI and TUI; read-only discovery remains available. The lock does not coordinate unrelated external Docker/APT commands.
 
 The keyboard-first TUI starts at a **minimal grouped menu**. Install/Upgrade
 opens a sectioned component list with a contextual details panel, then a
@@ -125,7 +125,7 @@ curl -fsSL https://raw.githubusercontent.com/truong51972/devbox-bootstrap/main/s
 - APT-managed tools are updated to the **newest version available in configured APT repositories**, using `apt-get install --only-upgrade` (never `apt upgrade` for the whole machine). `sudo` may ask for a password; Docker package updates may restart its service.
 - Standalone `uv` uses `uv self update` with shell-profile modification disabled. Other uv distributions (pip, pipx, Cargo) must be updated using their original manager.
 - Devbox-managed Powerlevel10k, Oh My Zsh and autosuggestions Git checkouts update only when their tracked files are clean and their remotes match the expected upstream. Existing personal shell configuration is preserved.
-- Devbox-managed `kubectl` and `minikube` binaries under `/usr/local/bin` can upgrade to newer versions only after SHA-256 verification; externally managed versions are preserved. For Kubernetes clusters, pin Devbox-managed `kubectl` with `--kubectl-version vMAJOR.MINOR.PATCH` to respect client/server version compatibility; this pinning option is not supported for APT-managed kubectl.
+- Devbox-managed `kubectl` and `minikube` binaries under `/usr/local/bin` can upgrade to newer versions only with a matching ownership receipt and SHA-256 verification; externally managed versions and older installations without receipts are preserved. Legacy binaries are not automatically adopted. For Kubernetes clusters, pin Devbox-managed `kubectl` with `--kubectl-version vMAJOR.MINOR.PATCH` to respect client/server version compatibility; this pinning option is not supported for APT-managed kubectl.
 - `--doctor` remains **read-only**; `--upgrade` must be explicitly requested. Missing tools are **skipped**, not installed. `--dry-run` previews checks without fetching package indexes, releases or changing files.
 
 Alternatively, review the scripts locally before running them:
@@ -142,7 +142,7 @@ Requires Ubuntu, Bash, an interactive terminal, network access, and `sudo` privi
 
 - Base packages (interactive full setup only): compiler/build tools, Git, curl, wget, CA certificates, and GnuPG. No automatic full-system `apt upgrade`.
 - Optional: Zsh + Oh My Zsh, syntax highlighting, autosuggestions, Powerlevel10k; uv; SSH keychain; zoxide; **fzf, ripgrep, bat + fd, direnv**; Docker Engine; NVIDIA Container Toolkit; kubectl; and Minikube.
-- Optional at the end: apt cleanup and reboot.
+- Optional at the end: reboot. Use Cleaner for APT download cache cleanup. The legacy explicit `--only clean` alias only runs `apt-get clean`, never autoremove.
 
 Each optional component is prompted separately and defaults to **No**. Powerlevel10k is offered only when Zsh is available; NVIDIA Toolkit only when Docker is available. Minikube is a separate optional installer. Configuration is written to the selected shell (`~/.zshrc` or `~/.bashrc`). The installer preserves an existing `~/.p10k.zsh` instead of overwriting it, and avoids repeating marked configuration blocks.
 
@@ -327,3 +327,9 @@ bash tests/upgrade-binary.sh
 ```
 
 CI also runs ShellCheck. Tests do not perform real package installations.
+
+### Structured run history
+
+New TUI runs save a versioned JSON summary next to the raw log, including action, duration, exit code, dry-run, per-component states and reported cleaner details. Old logs remain readable. Result distinguishes preview, partial, failed and successful execution; disk-footprint changes are not summed as guaranteed physical storage reclaimed. Background discovery tasks are owned and cancelled on exit, and the existing view layout lives in a separate presentation module. No additional dependencies are required.
+
+The compatibility job runs Python tests on Ubuntu 22.04 and 24.04; the main job runs shell and Python checks. Local Git integration uses disposable repositories and does not contact the network. UI tests check that construction and repeated detail rendering never invoke external commands. Ownership metadata is loaded in the existing background inventory scan; an unknown manager is not assumed to be Devbox-owned. Native operation cancellation is intentionally not exposed while package transactions run. Actual WSL and Docker cleanup measurements remain manual validation steps.

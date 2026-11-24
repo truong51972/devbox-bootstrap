@@ -3,7 +3,8 @@ set -Eeuo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 temp_dir="$(mktemp -d)"
 trap 'rm -rf -- "$temp_dir"' EXIT
-mkdir -p "$temp_dir/bin"
+export HOME="$temp_dir/home"
+mkdir -p "$temp_dir/bin" "$HOME"
 
 cat > "$temp_dir/bin/sudo" <<'MOCK'
 #!/usr/bin/env bash
@@ -46,13 +47,15 @@ command() {
     builtin command "$@"
 }
 export -f command
+# CI may already contain Minikube; isolate only the destination existence probe.
+binary_destination_exists() { return 1; }
 
 # Correct checksum allows install; a wrong checksum must prevent installation.
 source "$repo_dir/installers/minikube.sh"
 grep -Fq '/usr/local/bin/minikube' "$MOCK_LOG"
 : > "$MOCK_LOG"
 export MOCK_BAD_HASH=1
-if bash -c 'set -Eeuo pipefail; source "$1/utils/utils.sh"; source "$1/installers/minikube.sh"' bash "$repo_dir" >/dev/null 2>&1; then
+if bash -c 'set -Eeuo pipefail; source "$1/utils/utils.sh"; binary_destination_exists() { return 1; }; source "$1/installers/minikube.sh"' bash "$repo_dir" >/dev/null 2>&1; then
     echo 'Minikube accepted an invalid checksum' >&2
     exit 1
 fi
@@ -69,4 +72,6 @@ if output="$(bash "$repo_dir/setup-ubuntu.sh" --only clean 2>&1)"; then
     exit 1
 fi
 [[ "$output" == *'FAILED'* && "$output" == *'clean'* ]]
+grep -Fxq 'apt-get clean' "$MOCK_LOG"
+! grep -q 'autoremove' "$MOCK_LOG"
 printf 'Hardening tests passed.\n'

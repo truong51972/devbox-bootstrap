@@ -154,3 +154,39 @@ add_plugin_if_not_exists() {
     chmod --reference="$file" "$temp"
     mv -f -- "$temp" "$file"
 }
+
+
+# Ownership receipts identify exact verified artifacts, not arbitrary binaries
+# found in /usr/local/bin. Existing unrecorded installations are not adopted.
+record_managed_binary() {
+    local name="$1" artifact="$2" state="$HOME/.local/state/devbox-bootstrap/managed" digest tmp
+    digest="$(sha256sum -- "$artifact")" || return 1
+    digest="${digest%% *}"
+    [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    (umask 077; mkdir -p -- "$state") || return 1
+    tmp="$(mktemp "$state/$name.sha256.XXXXXX")" || return 1
+    if ! printf '%s\n' "$digest" > "$tmp" || ! mv -f -- "$tmp" "$state/$name.sha256"; then
+        rm -f -- "$tmp"
+        return 1
+    fi
+}
+
+managed_binary_matches() {
+    local name="$1" binary="$2" receipt expected actual
+    receipt="$HOME/.local/state/devbox-bootstrap/managed/$name.sha256"
+    [[ -f "$receipt" && ! -L "$receipt" && -f "$binary" && ! -L "$binary" && -x "$binary" ]] || return 1
+    expected="$(cat -- "$receipt")" || return 1
+    actual="$(sha256sum -- "$binary")" || return 1
+    [[ "$expected" =~ ^[0-9a-f]{64}$ && "$expected" == "${actual%% *}" ]]
+}
+
+trusted_github_origin() {
+    local origin="$1" project="$2"
+    case "$origin" in
+        "https://github.com/$project"|"https://github.com/$project.git"|"git@github.com:$project.git"|"ssh://git@github.com/$project.git") return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Check destination existence even if PATH does not expose the binary.
+binary_destination_exists() { [[ -e "$1" || -L "$1" ]]; }

@@ -55,6 +55,7 @@ class StartupUpdateTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(app, "start") as start:
                 app._answer_update(True)
                 start.assert_called_once_with("update", [])
+                self.assertEqual(app.update_revision, "new")
 
     async def test_defer_prompt_until_home(self):
         app = DevboxTUI()
