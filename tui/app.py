@@ -1053,7 +1053,8 @@ class DevboxTUI(DevboxViews):
                 options.append(Entry("ssh_key", "Generate unencrypted Ed25519 key if needed"))
             if {"rtk", "ponytail"} & set(self.selected):
                 for agent, label, binary in AGENT_EXECUTABLES:
-                    if shutil.which(binary):
+                    if (shutil.which(binary) and
+                            self.ponytail_agents.get(agent) != "Unavailable"):
                         options.append(Entry("agent_" + agent, "Integrate with " + label))
         self.options = self._make_options(options)
         self._layout_cache.pop("confirm", None)
