@@ -127,17 +127,12 @@ doctor_main() {
         log '[--]   RTK: not installed'
     fi
     doctor_bin 'Skills CLI' skills
-    local marker_dir="$HOME/.local/state/devbox-bootstrap/agent-extensions"
-    local marker found_ponytail=0
-    for marker in "$marker_dir"/ponytail-*; do
-        [[ -f "$marker" ]] || continue
-        found_ponytail=1
-        log "[NOTE] Ponytail: install recorded for ${marker##*/ponytail-} (activation unverified)"
-    done
-    if (( ! found_ponytail )); then
-        log '[--]   Ponytail: no Devbox-managed integrations recorded'
+    if command -v python3 >/dev/null 2>&1; then
+        if ! (cd "$SCRIPT_DIR" && python3 -m tui.agent_status); then
+            warn 'Ponytail inventory could not run; activation remains unverified.'
+        fi
     else
-        log '[NOTE] Ponytail status is a receipt; verify activation inside each agent.'
+        warn 'Ponytail inventory requires Python 3.'
     fi
 
     if (( problems > 0 )); then
