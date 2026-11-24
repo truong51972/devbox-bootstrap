@@ -23,7 +23,7 @@ STYLE = {
     "focus": "bg:ansiblue fg:ansiwhite bold",
     "checked": "fg:ansigreen bold",
     "installed": "fg:ansigreen",
-    "missing": "fg:ansibrightblack",
+    "missing": "fg:ansibrightred bold",
     "warning": "fg:ansiyellow",
     "error": "fg:ansired",
     "running": "fg:ansicyan bold",
@@ -41,7 +41,7 @@ MONO_STYLE = {
     "focus": "reverse bold",
     "checked": "bold",
     "installed": "bold",
-    "missing": "",
+    "missing": "underline bold",
     "warning": "bold",
     "error": "reverse bold",
     "running": "bold",
@@ -339,6 +339,7 @@ class KeyboardList:
                 gap = max(2, content_width - len(text) - len(entry.status))
                 fragments.append((row_style, text + " " * gap))
                 fragments.append((
+                    "class:focus class:missing" if active and entry.status == "Missing" else
                     "class:focus" if active else
                     STATUS_STYLES.get(entry.status, "class:muted"),
                     entry.status + "\n",
