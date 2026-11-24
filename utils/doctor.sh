@@ -127,8 +127,10 @@ doctor_main() {
         log '[--]   RTK: not installed'
     fi
     doctor_bin 'Skills CLI' skills
-    if command -v python3 >/dev/null 2>&1; then
-        if ! (cd "$SCRIPT_DIR" && python3 -m tui.agent_status); then
+    local inventory_python="$SCRIPT_DIR/.venv/bin/python"
+    [[ -x "$inventory_python" ]] || inventory_python=python3
+    if command -v "$inventory_python" >/dev/null 2>&1; then
+        if ! (cd "$SCRIPT_DIR" && "$inventory_python" -m tui.agent_status); then
             warn 'Ponytail inventory could not run; activation remains unverified.'
         fi
     else
