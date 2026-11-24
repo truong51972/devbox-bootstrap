@@ -243,11 +243,13 @@ verify_component() {
             "$rtk_exe" gain >/dev/null 2>&1 || { die 'RTK is not rtk-ai Token Killer'; return 1; } ;;
         skills-cli) verify_binary "$component" skills || return 1 ;;
         ponytail)
-            if ! command -v python3 >/dev/null 2>&1; then
+            local inventory_python="$SCRIPT_DIR/.venv/bin/python"
+            [[ -x "$inventory_python" ]] || inventory_python=python3
+            if ! command -v "$inventory_python" >/dev/null 2>&1; then
                 warn 'Ponytail commands completed; inventory requires Python 3.'
                 return 0
             fi
-            if ! python3 -m tui.agent_status --verify "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; then
+            if ! "$inventory_python" -m tui.agent_status --verify "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; then
                 warn 'Ponytail commands completed, but registration could not be fully verified.'
                 return 1
             fi ;;
