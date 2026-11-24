@@ -32,7 +32,7 @@ from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, installed, inve
 from tui.agent_status import AGENTS, LABELS, discover_agents, probe_agent_detail as probe_agent, PluginStatus, summary as ponytail_summary
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
 from tui.update_check import UpdateCheck, check_update
-from tui.views import DevboxViews, DETAIL_PANEL_WIDTH
+from tui.views import DevboxViews, WIDE_LAYOUT_MIN, SPLIT_SPACING, detail_panel_width
 from tui.tasks import BackgroundTasks
 from tui.reporting import RunReport, read_report, write_report, summarize_status, status_lines
 from tui.execution import prepare_run, run_env, launch, wait_for_run
@@ -348,14 +348,15 @@ class DevboxTUI(DevboxViews):
             on_change=self._invalidate,
             on_quit=self.quit,
             on_theme=self.toggle_theme,
-            get_columns=self.columns,
+            get_columns=self._component_list_width,
         )
 
     def _component_list_width(self) -> int:
-        """List pane width, excluding the fixed detail pane and VSplit spacing."""
-        if self.columns() >= 94:
-            return max(1, self.columns() - DETAIL_PANEL_WIDTH - 3)
-        return self.columns()
+        """Match the list renderer to the actual responsive split width."""
+        columns = self.columns()
+        if columns >= WIDE_LAYOUT_MIN:
+            return max(1, columns - detail_panel_width(columns) - SPLIT_SPACING)
+        return columns
 
     AGENT_SCAN_TTL = 60.0
 
@@ -674,7 +675,7 @@ class DevboxTUI(DevboxViews):
             on_help=self._show_help,
             on_change=self._invalidate,
             on_filter=self._begin_filter,
-            get_columns=self.columns,
+            get_columns=self._component_list_width,
         )
 
     def _invalidate(self) -> None:
