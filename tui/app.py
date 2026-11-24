@@ -111,7 +111,7 @@ HELP = """NAVIGATION
 
 COMPONENT SELECTION
   Space              Toggle highlighted component
-  a / n              Select visible / clear all
+  a / n              Select visible / clear all (Cleaner: all safe, even when filtered)
   /                  Filter by tool or group
   i                  Show full component details
   r                  Refresh agent plugin inventory
@@ -119,7 +119,8 @@ COMPONENT SELECTION
 
 CONFIRMATION
   Space              Toggle an optional change
-  d                  Toggle dry-run
+  d                  Toggle dry-run (default: apply changes)
+  Tab                Switch between plan and options, when present
   Enter              Start the selected action
 
 EXECUTION / RESULTS
@@ -173,8 +174,11 @@ class DevboxTUI:
         self.cleaner_rows: dict[str, Scan] = {}
         self.cleaner_scan_task: asyncio.Task[None] | None = None
         self.cleaner_scan_generation = 0
+        self.cleaner_all_requested = False
         self.cleaner_list = self._make_cleaner_list()
         self.options = self._make_options([])
+        self.confirm_plan = TextArea(text="", read_only=True, focusable=True,
+                                     scrollbar=True, wrap_lines=True)
         self.log_files = self._make_log_list([])
         self.status_view = TextArea(
             text="", read_only=True, focusable=True, scrollbar=True,
@@ -213,6 +217,7 @@ class DevboxTUI:
         self._bind_text(self.history_view, log_viewer=True)
         self._bind_text(self.help_view)
         self._bind_text(self.info_view)
+        self._bind_text(self.confirm_plan)
         self._bind_filter()
 
         self.views: dict[str, object] = {}
@@ -374,10 +379,33 @@ class DevboxTUI:
     def _make_cleaner_list(self) -> KeyboardList:
         return KeyboardList(
             [], multiple=True, bulk_allowed=lambda entry: entry.key in SAFE_KEYS,
+            on_all=self._select_all_cleaners, on_manual_selection=self._clear_cleaner_all_intent,
             on_enter=self.confirm_cleaners, on_back=self.back, on_help=self._show_help,
             on_change=self._invalidate, on_refresh=self.open_cleaner,
-            on_details=self._show_cleaner_info, get_columns=self._component_list_width,
+            on_details=self._show_cleaner_info, on_filter=self._begin_filter,
+            get_columns=self._component_list_width,
         )
+
+    def _clear_cleaner_all_intent(self) -> None:
+        self.cleaner_all_requested = False
+
+    def _select_all_cleaners(self) -> None:
+        # All is a global safe preset, not a snapshot of the visible or already
+        # measured rows. Manual changes cancel this intent.
+        self.cleaner_all_requested = True
+        self.cleaner_list.selected = {
+            entry.key for entry in self.cleaner_list.entries
+            if entry.selectable and entry.key in SAFE_KEYS
+        }
+        self._notice("All safe selected. Waiting for remaining safe checks..."
+                     if self._cleaner_all_pending() else
+                     "All available safe cleaners selected. Manual items excluded.")
+
+    def _cleaner_all_pending(self) -> bool:
+        return (self.cleaner_all_requested
+                and self.cleaner_scan_task is not None
+                and not self.cleaner_scan_task.done()
+                and bool(SAFE_KEYS - self.cleaner_rows.keys()))
 
     def _cleaner_entries(self) -> None:
         # Stable order and cursor: never rebuild the widget as results arrive.
@@ -394,6 +422,9 @@ class DevboxTUI:
         self.cleaner_list.selected.intersection_update(
             entry.key for entry in entries if entry.selectable
         )
+        if self.cleaner_all_requested:
+            self.cleaner_list.selected = {entry.key for entry in entries
+                                          if entry.selectable and entry.key in SAFE_KEYS}
         self._invalidate()
 
     def _cancel_cleaner_scan(self) -> None:
@@ -409,9 +440,12 @@ class DevboxTUI:
             self._notice("Scan already running. Ready items can be selected; Esc returns home.")
             return
         self.action = "clean"
-        self.dry_run = True
+        self.dry_run = False
         self.cleaner_rows.clear()
+        self.cleaner_all_requested = False
         self.cleaner_list.selected.clear()
+        self.filter_active = False
+        self.cleaner_list.set_query("")
         self._cleaner_entries()
         self._notice("Read-only scan started. Select ready items or press Esc.")
         self.navigate("cleaner", self.cleaner_list.window)
@@ -434,13 +468,14 @@ class DevboxTUI:
                 return
             self.cleaner_rows.update((row.key, row) for row in rows)
             self._cleaner_entries()
-            if self.screen == "cleaner":
+            if self.screen == "cleaner" and not self.filter_active:
                 done = len(self.cleaner_rows)
                 total = len(CLEANER_ITEMS)
                 ready = sum(row.available for row in self.cleaner_rows.values())
                 self._notice(f"{done}/{total} checked | {ready} ready | "
-                             + ("a = All ready safe; r = rescan" if done == total
-                                else "Scanning remaining items..."))
+                             + ("All safe: waiting for checks" if self._cleaner_all_pending() else
+                                "All safe selected" if self.cleaner_all_requested else
+                                "a = All safe; r = rescan" if done == total else "Scanning remaining items..."))
 
         await asyncio.gather(*(check(group) for group in PROBE_GROUPS))
 
@@ -450,13 +485,16 @@ class DevboxTUI:
         ready = sum(row.available for row in self.cleaner_rows.values())
         selected = self.cleaner_list.current_values
         manual = sum(key not in SAFE_KEYS for key in selected)
+        pending = len(SAFE_KEYS - self.cleaner_rows.keys()) if self._cleaner_all_pending() else 0
         width = 12
         filled = width * done // total
         return [
             ("class:running" if done < total else "class:checked",
              f"  {'Scanning' if done < total else 'Scan complete'} "
              f"[{'#' * filled}{'.' * (width - filled)}] {done}/{total}\n"),
-            ("class:body", f"  Ready {ready} | Selected {len(selected)} ({manual} manual) | All = ready safe only\n"),
+            ("class:body", f"  Ready {ready} | Selected {len(selected)} ({manual} manual)"
+             + (f" | All safe: {pending} pending" if pending else
+                " | All safe selected" if self.cleaner_all_requested else " | a = All safe") + "\n"),
         ]
 
     def _cleaner_details(self):
@@ -487,20 +525,26 @@ class DevboxTUI:
                     self._text(self._cleaner_details, width=Dimension.exact(DETAIL_PANEL_WIDTH)),
                 ], padding=1),
             ]))
+        if self.rows() >= 25 and self.columns() >= 64:
+            return self._layout("cleaner-medium", lambda: HSplit([
+                summary(), self._divider(), self.cleaner_list.window, self._divider(),
+                self._text(self._cleaner_details, height=6),
+            ]))
         return self._layout("cleaner-narrow", lambda: HSplit([
-            summary(), self._divider(), self.cleaner_list.window, self._divider(),
-            self._text(self._cleaner_details, height=6),
+            summary(), self._divider(), self.cleaner_list.window,
         ]))
 
     def confirm_cleaners(self) -> None:
         if self.busy:
             return
+        if self._cleaner_all_pending():
+            self._notice("All safe: waiting for remaining safe checks before confirmation. Esc returns home.")
+            return
         self.selected = self.cleaner_list.current_values
         if not self.selected:
-            self._notice("Select a ready cleaner using Space or a (All ready safe).")
+            self._notice("Select a ready cleaner using Space or a (All safe).")
             return
         self.auto_added = []
-        self.dry_run = True
         self._make_confirmation()
 
     def _make_options(self, entries: list[Entry]) -> KeyboardList:
@@ -512,7 +556,7 @@ class DevboxTUI:
             on_enter=self.execute_selection,
             on_back=self.back,
             on_help=self._show_help,
-            on_change=self._invalidate,
+            on_change=self._refresh_confirm_plan,
             on_dry=self.toggle_dry_run,
             get_columns=self.columns,
         )
@@ -567,7 +611,7 @@ class DevboxTUI:
         compact = {
             "Main menu": "↑↓ Move  Enter Open  t Theme  ? Help  q Quit",
             "Components": "↑↓ Move  Space Toggle  / Filter  i Info  r Refresh  Enter Next",
-            "Cleaner": "Space Toggle  a Safe  n None  i Info  r Scan  Enter Next  Esc",
+            "Cleaner": "Space Toggle  a Safe  / Filter  i Info  r Scan  Enter Next  Esc",
             "Confirm": "Space Options  d Dry-run  Enter Run  Esc Back",
             "Execution": "l Expand log  Exit locked",
             "Result": "l Log  Enter Home  Esc Back",
@@ -591,7 +635,8 @@ class DevboxTUI:
 
         def footer_text():
             width = max(0, self.columns() - 2)
-            value = compact.get(title, shortcut) if width < 85 else shortcut
+            value = (self._confirm_shortcuts() if title == "Confirm" else
+                     compact.get(title, shortcut) if width < 85 else shortcut)
             return [("class:footer", self._truncate("  " + value, width))]
 
         return HSplit([
@@ -617,8 +662,9 @@ class DevboxTUI:
             "↑↓ Move   Space Select   a All   n None   / Filter   i Info   r Refresh   Enter Next   Esc Back",
         )
         self.views["cleaner"] = self._page(
-            "Cleaner", DynamicContainer(self._cleaner_layout),
-            "Space Toggle   a All safe   n None   i Details   r Rescan   Enter Preview   Esc Back",
+            "Cleaner", HSplit([DynamicContainer(self._cleaner_layout),
+                               DynamicContainer(self._filter_layout)]),
+            "Space Toggle   a All safe   n None   / Filter   i Info   r Refresh   Enter Next   Esc Back",
         )
         self.views["cleaner_info"] = self._page("Cleaner details", self.info_view, "Esc Back to Cleaner")
         self.views["confirm"] = self._page(
@@ -694,16 +740,58 @@ class DevboxTUI:
             filter=Condition(lambda: self.filter_active),
         ))
 
+    def _confirm_shortcuts(self):
+        primary = "Enter Preview" if self.dry_run and self.action != "update" else {
+            "install": "Enter Install", "upgrade": "Enter Upgrade",
+            "clean": "Enter Clean", "update": "Enter Update",
+        }.get(self.action, "Enter Run")
+        keys = [primary, "Esc Back"]
+        if self.action != "update":
+            keys.insert(1, "d Dry-run")
+        if self.options.entries:
+            keys.extend(["Space Options", "Tab Focus"])
+        return "  ".join(keys)
+
+    def _confirm_mode(self):
+        preview = self.dry_run and self.action != "update"
+        requires_consent = (self.action == "clean" and bool(self.options.entries)
+                            and "risk" not in self.options.current_values and not preview)
+        return [
+            ("class:warning" if preview or requires_consent else "class:title",
+             "  DRY RUN — no changes\n" if preview else
+             "  MANUAL CLEANUP — consent required\n" if requires_consent else
+             "  APPLY CHANGES — Enter to confirm\n"),
+        ]
+
+    def _refresh_confirm_plan(self):
+        if hasattr(self, "confirm_plan"):
+            value = self._selection_summary()
+            if self.confirm_plan.text != value:
+                self.confirm_plan.text = value
+        self._invalidate()
+
     def _confirm_layout(self):
-        return self._layout("confirm", lambda: HSplit([
-            self._text(self._confirm_tokens, height=Dimension(min=5, weight=2)),
-            self._divider(),
-            self._text(lambda: [
-                ("class:section", "  OPTIONAL CHANGES (OFF BY DEFAULT)"),
-                ("", "\n"),
-            ], height=2),
-            self.options.window,
-        ]))
+        def build():
+            # The plan is focusable/scrollable even when there are no options.
+            children = [self._text(self._confirm_mode, height=1), self._divider(),
+                        self.confirm_plan]
+            if self.options.entries:
+                children += [
+                    self._divider(),
+                    self._text(lambda: [("class:section",
+                        "  REQUIRED CONSENT" if self.action == "clean" else
+                        "  OPTIONS (OFF BY DEFAULT)")], height=1),
+                    self.options.window,
+                ]
+                # Allocate only as much space as the actual choices need.
+                self.options.window.height = Dimension(
+                    min=1, preferred=len(self.options.entries), max=len(self.options.entries))
+            return HSplit(children)
+        return self._layout("confirm", build)
+
+    def _confirm_focus(self):
+        return self.options.window if self.options.entries else self.confirm_plan
+
 
     def _run_layout(self):
         return self._layout("run", lambda: HSplit([
@@ -813,25 +901,6 @@ class DevboxTUI:
         ])
         return out
 
-    def _confirm_tokens(self):
-        lines = self._selection_summary().splitlines()
-        tokens = [
-            ("class:section", "  EXECUTION PLAN\n\n"),
-        ]
-        for index, line in enumerate(lines):
-            if "DRY RUN" in line:
-                style = "class:warning"
-            elif index == 0:
-                style = "class:title"
-            elif "Auto-added:" in line:
-                style = "class:warning"
-            else:
-                style = "class:body"
-            tokens.append((style, "  " + line + "\n"))
-        if not self.options.entries:
-            tokens.append(("class:muted", "\n  No extra permissions requested."))
-        return tokens
-
     def _progress_tokens(self):
         active = [code for code, state in self.status.items() if state != "--"]
         complete = [
@@ -885,7 +954,11 @@ class DevboxTUI:
         self._invalidate()
 
     def _active_list(self) -> KeyboardList:
-        return self.log_files if self.screen == "logs" else self.selector
+        if self.screen == "logs":
+            return self.log_files
+        if self.screen == "cleaner":
+            return self.cleaner_list
+        return self.selector
 
     def _filter_changed(self, _buffer) -> None:
         self._active_list().set_query(self.filter_input.text)
@@ -937,6 +1010,15 @@ class DevboxTUI:
             if self.screen != "help":
                 self._show_help()
 
+        if widget is self.confirm_plan:
+            @kb.add("enter")
+            def _confirm(_event):
+                self.execute_selection()
+
+            @kb.add("d")
+            def _dry(_event):
+                self.toggle_dry_run()
+
         if widget is self.status_view:
             @kb.add("l")
             def _expand(_event):
@@ -980,6 +1062,13 @@ class DevboxTUI:
         @kb.add("c-q")
         def _quit(_event):
             self.quit()
+
+        @kb.add("tab", filter=Condition(lambda: self.screen == "confirm" and bool(self.options.entries)), eager=True)
+        def _switch_confirm_focus(_event):
+            if self.app.layout.has_focus(self.options.window):
+                self.app.layout.focus(self.confirm_plan)
+            else:
+                self.app.layout.focus(self.options.window)
 
         @kb.add("?", filter=Condition(lambda: self.screen != "help"))
         def _help(_event):
@@ -1031,10 +1120,12 @@ class DevboxTUI:
             self.list_history()
         elif action == "update":
             self.action = action
+            self.dry_run = False
             self.selected = []
             self.auto_added = []
             self._make_confirmation()
         elif action is not None:
+            self.dry_run = False
             self.start(action)
 
     def confirm_selection(self) -> None:
@@ -1066,9 +1157,16 @@ class DevboxTUI:
                         options.append(Entry("agent_" + agent, "Integrate with " + label))
         self.options = self._make_options(options)
         self._layout_cache.pop("confirm", None)
-        self._notice("Review the plan. Optional changes are OFF by default." if self.action != "clean"
-                     else "Dry-run ON. Press d to enable deletion; manual items require consent.")
-        self.navigate("confirm", self.options.window)
+        self._refresh_confirm_plan()
+        if self.action == "update":
+            self._notice("Review the plan. Enter updates Devbox.")
+        elif self.dry_run:
+            self._notice("Dry-run ON. Enter previews only; d enables changes.")
+        elif self.action == "clean" and self.options.entries:
+            self._notice("Manual items require consent. Space acknowledges; Enter confirms.")
+        else:
+            self._notice("Review the plan. Enter applies changes; d previews only.")
+        self.navigate("confirm", self._confirm_focus())
 
     def _chosen_agents(self) -> list[str]:
         if not hasattr(self, "options") or self.action != "install":
@@ -1077,31 +1175,46 @@ class DevboxTUI:
         return [agent for agent, _, _ in AGENT_EXECUTABLES if "agent_" + agent in selected]
 
     def _selection_summary(self) -> str:
-        if self.action == "clean":
-            mode = "DRY RUN (no deletion)" if self.dry_run else "REAL CLEANUP"
-            risks = "\n".join(CLEANER_ITEMS[k].description for k in self.selected if k not in SAFE_KEYS)
-            return mode + "\n" + ", ".join(self.selected) + "\n" + risks + (
-                "\nPolicy applies to eligible resources at execution. Estimates may overlap.")
         if self.action == "update":
-            return "Update Devbox source\nFast-forward only\nRestart the TUI after updating."
-        added = f"\nAuto-added: {', '.join(self.auto_added)}" if self.auto_added else ""
-        mode = "DRY RUN (no installation)" if self.dry_run else "REAL EXECUTION"
-        chosen = self.selected[:5]
-        details = "\n".join(chosen)
-        if len(self.selected) > len(chosen):
-            details += f"\n...and {len(self.selected) - len(chosen)} more"
-        warnings = []
+            return "Update Devbox source\n\nFast-forward only.\nRestart the TUI after updating."
+        mode = "DRY RUN (no changes)" if self.dry_run else "Apply selected changes"
+        if self.action == "clean":
+            lines = [f"Clean: {len(self.selected)} item(s)", mode, ""]
+            for key in self.selected:
+                item = CLEANER_ITEMS[key]
+                row = self.cleaner_rows.get(key)
+                estimate = row.estimate if row and row.available else "unknown"
+                risk = "SAFE" if key in SAFE_KEYS else "MANUAL"
+                lines.append(f"  {risk:6}  {item.label} — {estimate}")
+                if not item.safe:
+                    lines.append("          " + item.description)
+            if self.cleaner_all_requested:
+                excluded = [row for key, row in self.cleaner_rows.items()
+                            if key in SAFE_KEYS and not row.available]
+                if excluded:
+                    lines += ["", "Unavailable safe cleaners (not selected):"]
+                    lines += [f"  {CLEANER_ITEMS[row.key].label}: {row.note}" for row in excluded]
+            lines += ["", "Estimates may overlap; eligibility is rechecked at execution."]
+            if any(CLEANER_ITEMS[k].sudo for k in self.selected):
+                lines.append("Sudo authentication required for selected APT cleanup.")
+            if any(k not in SAFE_KEYS for k in self.selected):
+                lines.append("Manual items require explicit consent before deletion.")
+            return "\n".join(lines)
+        labels = dict(COMPONENTS)
+        lines = [f"{self.action.title()}: {len(self.selected)} component(s)", mode, ""]
+        for code in self.selected:
+            lines.append("  " + labels.get(code, code) +
+                         (" (dependency)" if code in self.auto_added else ""))
         if "nvidia" in self.selected:
-            warnings.append("NVIDIA setup may restart Docker")
+            lines += ["", "Warning: NVIDIA setup may restart Docker."]
         if "docker" in self.selected and self.action == "upgrade":
-            warnings.append("Docker upgrade may restart containers")
-        note = "\n" + "\n".join(warnings) if warnings else ""
+            lines += ["", "Warning: Docker upgrade may restart containers."]
         agents = self._chosen_agents()
         if agents:
-            note += "\nAgent targets: " + ", ".join(agents)
+            lines += ["", "Agent targets: " + ", ".join(agents)]
         elif "ponytail" in self.selected and self.action == "install":
-            note += "\nSelect an agent target for Ponytail (required)."
-        return f"{self.action.title()}: {len(self.selected)} component(s)\n{mode}\n" + details + added + note
+            lines += ["", "Select an agent target for Ponytail (required)."]
+        return "\n".join(lines)
 
     def toggle_dry_run(self) -> None:
         if self.action == "update":
@@ -1111,6 +1224,7 @@ class DevboxTUI:
             self._notice("Cannot change preview while a task is active.")
             return
         self.dry_run = not self.dry_run
+        self._refresh_confirm_plan()
         self._notice("Dry-run ON: no changes will be made." if self.dry_run
                      else "Dry-run OFF: changes will be applied.")
 
@@ -1134,7 +1248,7 @@ class DevboxTUI:
         self._cancel_cleaner_scan()
         # Reserve the slot before creating a task: rapid Enter cannot overlap APT.
         self.busy = True
-        self.current_action = action.title()
+        self.current_action = action.title() + (" (dry-run)" if self.dry_run and action in ("install", "upgrade", "clean") else "")
         self.status = {code: ("QUEUED" if code in chosen else "--")
                        for code in (CLEANER_ITEMS if action == "clean" else ORDER)}
         self.log_path = None
@@ -1151,7 +1265,7 @@ class DevboxTUI:
 
     async def _authorize_sudo(self) -> bool:
         if not shutil.which("sudo"):
-            self._notice("sudo is unavailable. Install/upgrade requires sudo.")
+            self._notice("sudo is unavailable. Selected operation requires sudo.")
             return False
         self._notice("Authenticating sudo in the terminal...")
         async with in_terminal():
@@ -1223,7 +1337,8 @@ class DevboxTUI:
                     self._refresh()
                 code = await self.process.wait()
             self._refresh()
-            self.last_result = ("Completed successfully." if code == 0
+            self.last_result = (("Preview complete — no changes made." if self.dry_run and action in ("install", "upgrade", "clean")
+                                 else "Completed successfully.") if code == 0
                                 else f"Failed with exit code {code}.")
             if action == "update" and code == 0:
                 self.last_result += " Restart TUI to load the new source."
@@ -1358,9 +1473,9 @@ class DevboxTUI:
             self.navigate("cleaner", self.cleaner_list.window)
         elif self.screen == "info":
             self.navigate("select", self.selector.window)
-        elif self.screen in ("select", "logs") and self.filter_active:
+        elif self.screen in ("select", "logs", "cleaner") and self.filter_active:
             self._cancel_filter()
-        elif self.screen in ("select", "logs") and self._active_list().query:
+        elif self.screen in ("select", "logs", "cleaner") and self._active_list().query:
             self.filter_input.text = ""
             self._active_list().set_query("")
             self._notice("Filter cleared. Press Esc again to return.")
@@ -1374,7 +1489,7 @@ class DevboxTUI:
         return {
             "home": self.menu.window, "select": self.selector.window,
             "cleaner": self.cleaner_list.window,
-            "confirm": self.options.window, "result": self.results_view,
+            "confirm": self._confirm_focus(), "result": self.results_view,
             "logs": self.log_files.window, "view_log": self.history_view,
             "run": self.status_view, "info": self.info_view, "cleaner_info": self.info_view,
         }.get(screen, self.help_view)

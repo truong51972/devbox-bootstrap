@@ -297,11 +297,57 @@ class LayoutTests(unittest.TestCase):
                             await asyncio.wait_for(task, 2)
         asyncio.run(scenario())
 
+    def test_shared_confirmation_without_options_keyboard(self):
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+
+        async def scenario():
+            with create_pipe_input() as pipe:
+                with create_app_session(input=pipe, output=DummyOutput()):
+                    app = DevboxTUI()
+                    task = asyncio.create_task(app.app.run_async())
+                    try:
+                        await asyncio.sleep(0.1)
+                        pipe.send_text("\r")
+                        await asyncio.sleep(0.1)
+                        app.selector.current_values = ["fzf"]
+                        pipe.send_text("\r")
+                        await asyncio.sleep(0.1)
+                        self.assertEqual(app.screen, "confirm")
+                        self.assertFalse(app.dry_run)
+                        self.assertTrue(app.app.layout.has_focus(app.confirm_plan))
+                        self.assertIn("Enter Install", app._confirm_shortcuts())
+                        pipe.send_text("d")
+                        await asyncio.sleep(0.1)
+                        self.assertTrue(app.dry_run)
+                        self.assertIn("Enter Preview", app._confirm_shortcuts())
+                        pipe.send_text("d")
+                        await asyncio.sleep(0.1)
+                        with patch.object(app, "start") as start:
+                            pipe.send_text("\r")
+                            await asyncio.sleep(0.1)
+                            start.assert_called_once_with("install", ["fzf"])
+                    finally:
+                        if not task.done():
+                            app.app.exit()
+                            await asyncio.wait_for(task, 2)
+        asyncio.run(scenario())
+
+    def test_update_confirmation_has_no_preview_option(self):
+        app = DevboxTUI()
+        app.dry_run = True
+        app.menu.index = next(i for i, entry in enumerate(app.menu.entries) if entry.key == "update")
+        app.open_menu()
+        self.assertFalse(app.dry_run)
+        self.assertIn("Enter Update", app._confirm_shortcuts())
+        self.assertNotIn("d Dry-run", app._confirm_shortcuts())
+
     def test_compact_footer_is_readable(self):
         app = DevboxTUI()
         for width in (58, 80, 120):
             app.columns = lambda w=width: w
-            for screen in ("home", "select", "confirm", "run", "result", "logs"):
+            for screen in ("home", "select", "cleaner", "confirm", "run", "result", "logs"):
                 with self.subTest(width=width, screen=screen):
                     page = app.views[screen]
                     footer_control = page.children[-1].content

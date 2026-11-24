@@ -86,8 +86,8 @@ def run(argv, *, timeout=12):
                           stdin=subprocess.DEVNULL, check=False, env=command_env(argv))
 
 
-def checked(argv):
-    result = run(argv)
+def checked(argv, *, timeout=12):
+    result = run(argv, timeout=timeout)
     if result.returncode:
         raise RuntimeError("Command unavailable or failed: " + " ".join(argv))
     return result.stdout.strip()
@@ -98,11 +98,11 @@ def docker_prefix():
     # precedence in Docker; inspect its endpoint instead of guessing.
     endpoint = os.environ.get("DOCKER_HOST", "")
     if os.environ.get("DOCKER_CONTEXT") or not endpoint:
-        context = checked(["docker", "context", "show"])
+        context = checked(["docker", "context", "show"], timeout=3)
         if not context:
             raise RuntimeError("No Docker context")
         endpoint = checked(["docker", "context", "inspect", "--format",
-                            "{{.Endpoints.docker.Host}}", context])
+                            "{{.Endpoints.docker.Host}}", context], timeout=3)
     if not endpoint.startswith("unix:///") or "\n" in endpoint:
         raise RuntimeError("Remote/non-Unix Docker endpoint refused")
     # An explicit --context conflicts with --host; the CLI flag pins the host.
@@ -120,10 +120,14 @@ def size(path):
     path = Path(path)
     if not path.is_absolute() or path.is_symlink() or not path.is_dir():
         return "unknown"
-    result = run(["du", "-sx", "--block-size=1", "--", str(path)])
-    if result.returncode:
+    try:
+        result = run(["du", "-sx", "--block-size=1", "--", str(path)])
+        if result.returncode:
+            return "unknown"
+        return human(int(result.stdout.split()[0]))
+    except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
+        # Failure to measure a verified cache must not make it unavailable.
         return "unknown"
-    return human(int(result.stdout.split()[0]))
 
 
 def human(value):
@@ -155,6 +159,21 @@ PROBE_CONCURRENCY = 4
 PROBE_TIMEOUT = 30
 
 
+def pip_cache_command():
+    """Prefer the system interpreter; fall back to a user-installed pip CLI."""
+    candidates = [["python3", "-m", "pip"], ["pip3"], ["pip"]]
+    for argv in candidates:
+        if not shutil.which(argv[0]):
+            continue
+        try:
+            path = checked(argv + ["cache", "dir"], timeout=4)
+            if path and Path(path).is_absolute():
+                return argv, path
+        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
+            continue
+    raise RuntimeError("No working pip cache command (python3 -m pip, pip3, pip)")
+
+
 def scan_group(group, docker_target=None, *, measure=True):
     keys = PROBE_GROUPS[group]
     rows = []
@@ -162,7 +181,16 @@ def scan_group(group, docker_target=None, *, measure=True):
     if group == "docker" and shutil.which("docker"):
         try:
             prefix = docker_target if docker_target is not None else docker_prefix()
-            docker = docker_df(prefix) if measure else {"verified": checked(prefix + ["info", "--format", "{{.ID}}"])}
+            if measure:
+                try:
+                    docker = docker_df(prefix)
+                    if not docker:
+                        raise RuntimeError("Empty disk usage inventory")
+                except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired):
+                    # A slow/unsupported size query is not a daemon failure.
+                    docker = {"verified": checked(prefix + ["info", "--format", "{{.ID}}"], timeout=5)}
+            else:
+                docker = {"verified": checked(prefix + ["info", "--format", "{{.ID}}"], timeout=5)}
             if not docker or not any(docker.values()):
                 raise RuntimeError("Docker inventory unavailable")
         except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
@@ -171,7 +199,7 @@ def scan_group(group, docker_target=None, *, measure=True):
     for key in keys:
         item = BY_KEY[key]
         try:
-            if item.tool and not shutil.which(item.tool):
+            if item.key != "pip-cache" and item.tool and not shutil.which(item.tool):
                 rows.append(Scan(item.key, False, "-", "Tool not installed"))
                 continue
             if item.tool == "docker":
@@ -188,11 +216,13 @@ def scan_group(group, docker_target=None, *, measure=True):
                 estimate = human(sum(n for _, n in old_logs())) if measure else "not measured"
             else:
                 commands = {
-                    "pip-cache": ["python3", "-m", "pip", "cache", "dir"],
-                    "npm-cache": ["npm", "config", "get", "cache"],
+                        "npm-cache": ["npm", "config", "get", "cache"],
                     "uv-cache": ["uv", "cache", "dir"],
                 }
-                path = checked(commands[key]) if key in commands else "/var/cache/apt/archives"
+                if key == "pip-cache":
+                    _, path = pip_cache_command()
+                else:
+                    path = checked(commands[key]) if key in commands else "/var/cache/apt/archives"
                 estimate = size(path) if measure else "not measured"
             rows.append(Scan(item.key, True, estimate, "Cache footprint; not guaranteed reclaimable."))
         except (OSError, RuntimeError, ValueError, IndexError, subprocess.TimeoutExpired) as exc:
@@ -261,6 +291,9 @@ def execute(item, docker_target=None):
         if docker_target is None:
             raise RuntimeError("Docker target was not verified for this run")
         argv = docker_target + list(item.command)
+    elif item.key == "pip-cache":
+        prefix, _ = pip_cache_command()
+        argv = prefix + ["cache", "purge"]
     elif item.sudo:
         argv = ["sudo", "-n", item.tool, *item.command]
     else:
@@ -342,6 +375,10 @@ def main(argv=None):
             event(key, "PLANNED")
         print("Preview only; no changes.")
         return 0
+    if args.all_safe:
+        for row in rows:
+            if row.key in SAFE_KEYS and not row.available:
+                print(f"Skipped {row.key}: {row.note}")
     if not keys:
         print("No available cleaners selected.")
         return 0
@@ -357,7 +394,8 @@ def main(argv=None):
     failed = False
     for key in keys:
         if key not in available:
-            print(f"Skipped {key}: unavailable")
+            reason = next((row.note for row in rows if row.key == key), "unavailable")
+            print(f"Skipped {key}: {reason}")
             event(key, "SKIPPED")
             failed = True
             continue

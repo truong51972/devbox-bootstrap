@@ -101,6 +101,8 @@ class KeyboardList:
         multiple: bool = False,
         bulk_select: bool = True,
         bulk_allowed: Callable[[Entry], bool] | None = None,
+        on_all: Callable[[], None] | None = None,
+        on_manual_selection: Callable[[], None] | None = None,
         empty_text: str = "No matching entries. Press / to edit the filter.",
         get_columns: Callable[[], int] = lambda: 100,
         on_filter: Callable[[], None] | None = None,
@@ -118,6 +120,7 @@ class KeyboardList:
         self.query = ""
         self.get_columns = get_columns
         self.on_change = on_change
+        self.on_manual_selection = on_manual_selection
 
         kb = KeyBindings()
 
@@ -180,7 +183,11 @@ class KeyboardList:
 
         if multiple and bulk_select:
             @kb.add("a")
+            @kb.add("A")
             def _all(_event) -> None:
+                if on_all is not None:
+                    on_all()
+                    return
                 # Preserve selected items hidden by an active filter.
                 if bulk_allowed is None:
                     self.selected.update(item.key for item in self.visible if item.selectable)
@@ -190,7 +197,10 @@ class KeyboardList:
                 self.on_change()
 
             @kb.add("n")
+            @kb.add("N")
             def _none(_event) -> None:
+                if self.on_manual_selection is not None:
+                    self.on_manual_selection()
                 self.selected.clear()
                 self.on_change()
 
@@ -264,6 +274,8 @@ class KeyboardList:
     def toggle(self) -> None:
         current = self.current
         if current is not None and current.selectable:
+            if self.on_manual_selection is not None:
+                self.on_manual_selection()
             if current.key in self.selected:
                 self.selected.remove(current.key)
             else:

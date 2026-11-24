@@ -36,7 +36,8 @@ after updating source code.
 
 The keyboard-first TUI starts at a **minimal grouped menu**. Install/Upgrade
 opens a sectioned component list with a contextual details panel, then a
-compact confirmation, execution progress, and result screen. The layout adapts
+compact confirmation, execution progress, and result screen. Cleaner uses the same
+confirmation controls and displays only relevant consent/options. The layout adapts
 to wide and narrow terminals (with `i` for details in compact mode). Doctor,
 Preflight, Update Devbox and Logs & History remain separate choices.
 Mouse input is deliberately disabled. No new TUI dependencies are required.
@@ -49,7 +50,8 @@ Mouse input is deliberately disabled. No new TUI dependencies are required.
 | / | Components, History | Search/filter the visible list |
 | I | Components | Full details (useful in narrow terminals) |
 | T | Main menu | Toggle minimal color / monochrome theme |
-| D | Confirmation | Toggle dry-run |
+| D | Confirmation | Toggle dry-run (off by default; not supported for source update) |
+| Tab | Confirmation | Switch between scrollable plan and options, when present |
 | Esc | Idle screens | Back (or clear active filter) |
 | L | Execution, Results | Expand live log / open saved log |
 | O | Log viewer | Open external pager (if installed) |
@@ -216,9 +218,15 @@ Open **Cleaner** in the TUI to scan installed tools and known cache locations.
 Rows appear immediately, with independent read-only probes (up to four concurrently)
 and live progress. Slow/unavailable items do not block navigation or selection of
 ready items. Esc cancels the scan when returning home; r starts a new scan after
-completion. Press **a (All safe)** to select only safe currently ready cleaners; this also clears
-any previous manual selection. Space can select a manual item individually.
-Confirmation defaults to dry-run; press d to enable deletion. Manual items
+completion. Press **a/A (All safe)** to select all available safe cleaners, even
+when a filter is active or scanning is still in progress. Late safe results are
+added automatically; Enter waits for the remaining safe checks before opening
+confirmation. Unavailable safe items are listed with their reasons. All clears
+any previous manual selection. Space or n/N cancels automatic selection; Space
+can select a manual item individually. Unknown size alone does not disable a
+verified cache or local Docker daemon.
+Like Install and Upgrade, confirmation defaults to applying the selected changes;
+Enter confirms, d switches to dry-run (no changes). Manual items
 require a separate acknowledgement. No cleanup runs merely by opening Cleaner.
 
 ```bash
