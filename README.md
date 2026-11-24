@@ -210,6 +210,38 @@ Official sources: https://github.com/rtk-ai/rtk ,
 https://github.com/vercel-labs/skills ,
 https://github.com/DietrichGebert/ponytail .
 
+## Developer Cleaner
+
+Open **Cleaner** in the TUI to scan installed tools and known cache locations.
+Press **a (All safe)** to select only safe available cleaners; this also clears
+any previous manual selection. Space can select a manual item individually.
+Confirmation defaults to dry-run; press d to enable deletion. Manual items
+require a separate acknowledgement. No cleanup runs merely by opening Cleaner.
+
+```bash
+devbox --clean                         # read-only inventory
+devbox --clean --scan --json           # machine-readable inventory
+devbox --clean --all                   # safe policy preview
+devbox --clean --all --yes             # explicitly apply safe policy
+devbox --clean --only docker-build-cache,pip-cache --yes
+devbox --clean --only docker-unused-images --yes --allow-risky
+devbox --clean --help
+```
+
+Safe means regenerable caches (rebuilds/downloads may take time): old dangling
+Docker images and build cache (7 days), pip/npm downloads and APT archives.
+Old unused tagged Docker images, unused local Docker volumes (including named
+volumes), uv cache and Devbox logs/events older than 30 days are manual-only.
+Volume deletion is irreversible; back up first. Volumes labeled
+`devbox.protect=true` are excluded. No stopped-container removal, broad system
+prune, arbitrary directory deletion, or model-weight deletion is performed.
+Docker commands refuse non-Unix endpoints and rely on Docker's native
+reference checks; don't run cleanup concurrently with other Docker/build jobs.
+The preview describes a policy, not a frozen list of resources; eligibility
+is evaluated at execution. Docker estimates are category-wide and may overlap.
+Free-space change is measured on root/home filesystems, not attributed exactly
+to each cleaner. WSL VHDX compaction is intentionally not automated.
+
 ## CLI tools
 
 Optional tools: `fzf` (interactive selection), `ripgrep` (search file contents), `bat + fd` (view/find files) and `direnv` (per-project environment). Their installer scripts contain short explanations and upstream links in the header comments.
