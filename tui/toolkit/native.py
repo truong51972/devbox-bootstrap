@@ -19,11 +19,14 @@ def safe_text(value: str) -> str:
 
 def native(argv, *, cwd=None, timeout=8, env=None):
     """Capture bounded output from a finite native query; fail on nonzero exit."""
-    if not argv or not shutil.which(argv[0]):
+    # Resolve before changing cwd; ignore relative PATH entries for discovery.
+    trusted_path = os.pathsep.join(p for p in os.get_exec_path(env) if os.path.isabs(p))
+    binary = shutil.which(argv[0], path=trusted_path) if argv and trusted_path else None
+    if not binary or not os.path.isabs(binary):
         raise ValueError("Required executable unavailable: " + (argv[0] if argv else "?"))
     with tempfile.TemporaryFile() as out:
         try:
-            result = subprocess.run(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+            result = subprocess.run([binary, *argv[1:]], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                     stdout=out, stderr=subprocess.STDOUT,
                                     timeout=timeout, check=False)
         except subprocess.TimeoutExpired as exc:

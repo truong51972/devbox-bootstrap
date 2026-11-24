@@ -33,6 +33,8 @@ LEGACY_ENTRIES = (
     ("install", "Install tools", "Environment", "Select components and review the install plan."),
     ("upgrade", "Upgrade tools", "Environment", "Upgrade installed components through their managers."),
     ("agent-install", "Install agent extensions", "Coding Agents", "Select RTK, Skills CLI or Ponytail."),
+    ("rtk-install", "Configure RTK targets", "Coding Agents", "Choose RTK agent targets independently."),
+    ("ponytail-install", "Configure Ponytail targets", "Coding Agents", "Choose Ponytail agent targets independently."),
     ("clean", "Cleaner", "Storage", "Scan caches and review safe or manual cleanup."),
     ("doctor", "Doctor", "Health", "Run existing read-only health checks."),
     ("preflight", "Host preflight", "Health", "Inspect host prerequisites."),
@@ -211,6 +213,10 @@ class ToolkitScreens:
             action = key[7:]
             if action == "theme":
                 self.toggle_theme()
+            elif action in ("rtk-install", "ponytail-install"):
+                self.open_menu("install")
+                self.selector.current_values = [action.split("-")[0]]
+                self.confirm_selection()
             elif action == "agent-install":
                 self.open_menu("install")
                 self.selector.set_query("AI AGENT EXTENSIONS")

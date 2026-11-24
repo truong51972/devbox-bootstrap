@@ -18,7 +18,7 @@ def endpoint(value, default_port=None):
     parsed = urlsplit("//" + value)
     if not parsed.hostname or parsed.hostname.startswith("-") or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
         raise ValueError("Enter host:port (IPv6 in brackets).")
-    port = parsed.port or default_port
+    port = parsed.port if parsed.port is not None else default_port
     if not port or not 1 <= port <= 65535:
         raise ValueError("A valid port is required.")
     return parsed.hostname, port

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import heapq
+import time
 import platform
 import shutil
 from pathlib import Path
@@ -80,12 +82,16 @@ def largest(value, cwd):
     return "\n".join(f"{bytes_label(size):>12}  {label}" for size, label in sorted(rows, reverse=True)[:30]) or "No measurable subdirectories."
 
 
-def caches(_value, _cwd):
+def cache_locations():
     home = Path.home()
-    paths = [("pip", home / ".cache/pip"), ("uv", home / ".cache/uv"),
+    return [("pip", home / ".cache/pip"), ("uv", home / ".cache/uv"),
              ("npm", home / ".npm"), ("pnpm", home / ".local/share/pnpm/store"),
              ("Yarn", home / ".cache/yarn"), ("Hugging Face", Path(os.environ.get("HF_HOME") or home / ".cache/huggingface")),
              ("PyTorch", home / ".cache/torch"), ("Ollama", Path(os.environ.get("OLLAMA_MODELS") or home / ".ollama/models"))]
+
+
+def caches(_value, _cwd):
+    paths = cache_locations()
     return "\n".join(f"{name:<14} {'Present' if path.is_dir() else 'Not found':<10} {path}" for name, path in paths) + "\nLocation hints only; no cache or model is deleted."
 
 
@@ -120,3 +126,58 @@ def project(_value, cwd):
 def git_status(_value, cwd):
     return native(["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "status",
                    "--short", "--branch", "--untracked-files=no"], cwd=cwd)
+
+
+def cache_sizes(_value, _cwd):
+    from concurrent.futures import ThreadPoolExecutor
+    def measure(row):
+        name, path = row
+        if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+            return f"{name:<14} unavailable"
+        try:
+            size = int(native(["du", "-sx", "-B1", "--", str(path)], timeout=10).split()[0])
+            return f"{name:<14} {bytes_label(size):>12}  {path}"
+        except (OSError, ValueError, RuntimeError):
+            return f"{name:<14} unknown  {path}"
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        return "\n".join(pool.map(measure, cache_locations())) + "\nFootprints may overlap; no data is deleted."
+
+
+def largest_files(value, cwd):
+    import stat
+    root = existing_dir(value, cwd)
+    if root == Path("/"):
+        raise ValueError("Choose a specific directory, not the entire root filesystem.")
+    device = root.stat().st_dev
+    stack = [root]
+    heap = []
+    visited = 0
+    deadline = time.monotonic() + 8
+    partial = False
+    while stack and not partial:
+        directory = stack.pop()
+        try:
+            with os.scandir(directory) as rows:
+                for entry in rows:
+                    visited += 1
+                    if visited > 100000 or time.monotonic() > deadline:
+                        partial = True
+                        break
+                    try:
+                        info = entry.stat(follow_symlinks=False)
+                        if info.st_dev != device:
+                            continue
+                        if stat.S_ISDIR(info.st_mode):
+                            stack.append(entry.path)
+                        elif stat.S_ISREG(info.st_mode):
+                            row = (info.st_size, entry.path)
+                            if len(heap) < 30:
+                                heapq.heappush(heap, row)
+                            else:
+                                heapq.heappushpop(heap, row)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    output = "\n".join(f"{bytes_label(size):>12}  {path}" for size, path in sorted(heap, reverse=True))
+    return (output or "No readable files.") + ("\nPartial results: scan budget reached." if partial else "\nLogical file sizes; inaccessible paths and other filesystems excluded.")

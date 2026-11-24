@@ -16,11 +16,15 @@ devbox sys processes python
 devbox storage usage
 devbox storage largest .
 devbox storage caches
+devbox storage cache-sizes
+devbox storage files .
 devbox docker ps
 devbox docker logs api
 devbox docker restart api        # preview only
 devbox agent integrations
 devbox agent skills global
+devbox agent integrate rtk codex opencode  # preview only
+devbox agent integrate ponytail agy       # independent targets
 devbox project detect
 devbox health check
 devbox health json
@@ -31,7 +35,7 @@ devbox util uuid7
 devbox run gpu-watch --yes
 ```
 
-Docker operations are local Unix endpoint only. Process termination requires a user-owned process, matching PID identity and pidfd support; explicitly add --yes to execute CLI mutations. No automatic deletion, remote Docker mutation or project-config execution is performed. Container logs and text transforms may contain secrets; they are displayed but not stored by Devbox.
+Docker operations are local Unix endpoint only. Process termination requires a user-owned process, matching PID identity and pidfd support; explicitly add --yes to execute CLI mutations. No automatic deletion, remote Docker mutation or project-config execution is performed. Container logs and text transforms may contain secrets; they are displayed but not stored by Devbox. Pass secrets via stdin, not CLI arguments that may be exposed to shell history or other processes.
 
 User workflows are explicitly registered in `$XDG_CONFIG_HOME/devbox-bootstrap/actions.json` (default `~/.config/devbox-bootstrap/actions.json`), e.g. `[{"id":"gpu-status","command":["nvidia-smi"]}]`. Preview with `devbox run gpu-status`, then explicitly launch with `--yes`. Commands are argv arrays, not interpolated shell strings. Workflows can execute arbitrary user-approved commands; review them before launching.
 

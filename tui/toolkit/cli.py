@@ -53,9 +53,23 @@ def main(argv=None):
             for action in ACTIONS:
                 print(f"{action.id.replace('.', ' ', 1):<30} {action.description}")
             print("\nManaged: sys terminate PID, docker start|stop|restart CONTAINER (preview unless --yes)")
-            print("Other: env install|upgrade, storage scan|clean, health doctor|preflight, run [ID] [--yes]")
+            print("Other: env install|upgrade, agent integrate, storage scan|clean, health doctor|preflight, run [ID] [--yes]")
             return 0
         legacy(argv)
+        if argv[:2] == ["agent", "integrate"]:
+            from tui.agent_status import AGENTS
+            args = argv[2:]
+            confirmed = bool(args and args[-1] == "--yes")
+            if confirmed:
+                args.pop()
+            if len(args) < 2 or args[0] not in ("rtk", "ponytail") or any(a not in AGENTS for a in args[1:]) or len(set(args[1:])) != len(args[1:]):
+                raise ValueError("Usage: devbox agent integrate rtk|ponytail AGENT [AGENT ...] [--yes]")
+            command = [str(ROOT / "bin/devbox"), "--only", args[0], "--agents", ",".join(args[1:])]
+            print(shlex.join(command), flush=True)
+            if confirmed:
+                os.execv(command[0], command)
+            print("Preview only. Add --yes to install this integration for the chosen agents.")
+            return 0
         if argv[0] == "run":
             workflows = list_workflows()
             if len(argv) == 1:

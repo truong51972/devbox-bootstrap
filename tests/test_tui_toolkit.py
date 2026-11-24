@@ -42,6 +42,19 @@ class ToolkitTests(unittest.TestCase):
             self.assertEqual(main(["docker", "stop", "api"]), 0)
             apply.assert_not_called()
 
+    def test_agent_integration_targets_are_independent(self):
+        with patch("tui.toolkit.cli.os.execv") as execute, patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(main(["agent", "integrate", "rtk", "codex", "opencode"]), 0)
+            execute.assert_not_called()
+
+    def test_scoped_largest_files(self):
+        from tui.toolkit.system import largest_files
+        with TemporaryDirectory() as tmp:
+            (Path(tmp) / "one").write_bytes(b"x" * 100)
+            (Path(tmp) / "two").write_bytes(b"x" * 200)
+            output = largest_files(tmp, tmp)
+            self.assertLess(output.index("two"), output.index("one"))
+
     def test_workflow_registration_and_favorite_persistence(self):
         with TemporaryDirectory() as tmp, patch.dict(os.environ, {"XDG_CONFIG_HOME": tmp}):
             self.assertTrue(settings.toggle_favorite("net.ports"))

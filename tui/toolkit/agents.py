@@ -34,3 +34,13 @@ def skills(value, cwd):
         raise ValueError("Scope: global or project.")
     args = ["skills", "list"] + (["-g"] if value != "project" else [])
     return native(args, cwd=cwd, timeout=12)
+
+
+def version(value, _cwd):
+    if value not in AGENTS:
+        raise ValueError("Choose one of: " + ", ".join(AGENTS))
+    return native([value, "--version"])
+
+
+def skill_updates(_value, cwd):
+    return native(["skills", "check"], cwd=cwd, timeout=20)
