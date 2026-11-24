@@ -455,9 +455,8 @@ class DevboxTUI:
         return [
             ("class:running" if done < total else "class:checked",
              f"  {'Scanning' if done < total else 'Scan complete'} "
-             f"[{'#' * filled}{'.' * (width - filled)}] {done}/{total}"),
-            ("class:body", f"  Ready {ready} | Selected {len(selected)} ({manual} manual)\n"),
-            ("class:muted", "  All = ready safe only. Estimates may overlap; no data deleted.\n"),
+             f"[{'#' * filled}{'.' * (width - filled)}] {done}/{total}\n"),
+            ("class:body", f"  Ready {ready} | Selected {len(selected)} ({manual} manual) | All = ready safe only\n"),
         ]
 
     def _cleaner_details(self):
