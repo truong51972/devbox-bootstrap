@@ -102,7 +102,7 @@ if [[ -n "$BOOTSTRAP_AGENT_TARGETS" ]]; then
     IFS=',' read -r -a DEVBOX_AGENT_TARGETS_ARRAY <<< "$BOOTSTRAP_AGENT_TARGETS"
     declare -A seen_agent=()
     for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
-        case "$agent" in claude|codex|copilot|opencode|gemini) ;; *)
+        case "$agent" in claude|codex|copilot|opencode|gemini|agy) ;; *)
             echo "Unsupported agent target: $agent" >&2; exit 2 ;;
         esac
         if [[ -n "${seen_agent[$agent]:-}" ]]; then
