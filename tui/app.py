@@ -33,6 +33,7 @@ from tui.backend import (
 from tui.catalog import COMPONENTS, GROUPS, ORDER, DEPENDENCIES, installed, inventory, with_dependencies
 from tui.agent_status import AGENTS, LABELS, discover_agents, probe_agent, summary as ponytail_summary
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
+from tui.update_check import UpdateCheck, check_update
 from tui.cleaner import (BY_KEY as CLEANER_ITEMS, SAFE_KEYS, PROBE_GROUPS,
                          PROBE_CONCURRENCY, Scan, probe_group)
 
@@ -60,7 +61,7 @@ MENU_DETAILS = {
     "doctor": "Check binaries, services, permissions and configuration.",
     "preflight": "Inspect the system before attempting installation.",
     "clean": "Scan developer caches. All selects safe items only; manual items require consent.",
-    "update": "Fast-forward Devbox source and restart the application.",
+    "update": "Fast-forward Devbox source, then exit on success.",
     "logs": "Review past operations and their complete terminal output.",
     "exit": "Leave Devbox without modifying the system.",
 }
@@ -154,6 +155,9 @@ class DevboxTUI:
         self.busy = False
         self.dry_run = False
         self.message = "Ready. Choose an action."
+        self.update_check_task: asyncio.Task[None] | None = None
+        self.pending_update: UpdateCheck | None = None
+        self.exit_message = ""
         self.process: asyncio.subprocess.Process | None = None
         self.log_path: Path | None = None
         self.event_path: Path | None = None
@@ -170,6 +174,13 @@ class DevboxTUI:
         self._search_text = ""
 
         self.menu = self._make_menu()
+        self.update_choices = KeyboardList(
+            [Entry("no", "No — continue without updating"),
+             Entry("yes", "Yes — update Devbox and exit")],
+            on_enter=self._answer_update, on_back=self._decline_update,
+            on_help=self._show_help, on_change=self._invalidate,
+            get_columns=self.columns,
+        )
         self.selector = self._make_selector()
         self.cleaner_rows: dict[str, Scan] = {}
         self.cleaner_scan_task: asyncio.Task[None] | None = None
@@ -247,6 +258,73 @@ class DevboxTUI:
             return self.app.output.get_size().rows
         except (AttributeError, ValueError):
             return 24
+
+    def _start_update_check(self) -> None:
+        if os.environ.get("DEVBOX_CHECK_UPDATES", "1") == "0":
+            return
+        self._notice("Checking for Devbox updates...")
+        self.update_check_task = self.app.create_background_task(self._check_startup_update())
+
+    def _cancel_update_check(self) -> None:
+        if self.update_check_task is not None and not self.update_check_task.done():
+            self.update_check_task.cancel()
+        self.pending_update = None
+
+    async def _check_startup_update(self) -> None:
+        result = await check_update(ROOT)
+        if result.state == "available":
+            self.pending_update = result
+            if self.screen == "home" and not self.busy:
+                self._show_update_prompt()
+        elif self.screen == "home" and not self.busy:
+            message = {
+                "current": "Devbox is up to date. Choose an action.",
+                "dirty": "Update check skipped: local tracked changes. Choose an action.",
+                "unsupported": "Update check skipped for this checkout. Choose an action.",
+                "not-fast-forward": "Update check: local history is ahead or diverged.",
+            }.get(result.state, "Update check unavailable. Choose an action.")
+            self._notice(message)
+
+    def _show_update_prompt(self) -> None:
+        if self.pending_update is None or self.busy or self.screen != "home":
+            return
+        self.update_choices.index = 0
+        self._notice("Update available. Choose Yes or No.")
+        self.navigate("update_prompt", self.update_choices.window)
+
+    def _update_details(self):
+        result = self.pending_update
+        if result is None:
+            return [("class:muted", "  No update pending.")]
+        return [
+            ("class:title", "  A new Devbox revision is available.\n\n"),
+            ("class:body", f"  Installed: {result.current[:12]}\n"
+                           f"  Latest:    {result.latest[:12]}\n"
+                           f"  New commits: {result.commits}\n\n"),
+            ("class:muted", "  Yes updates source and runtime, then exits.\n"
+                            "  Run devbox again to load the new version.\n"
+                            "  No continues with the installed version.\n"),
+        ]
+
+    def _decline_update(self) -> None:
+        self.pending_update = None
+        self._notice("Update skipped for this session.")
+        self.navigate("home", self.menu.window)
+
+    def _answer_update(self, yes: bool | None = None) -> None:
+        if self.screen != "update_prompt" or self.pending_update is None or self.busy:
+            return
+        if yes is None:
+            yes = self.update_choices.current_value == "yes"
+        if not yes:
+            self._decline_update()
+            return
+        self.pending_update = None
+        self.action = "update"
+        self.dry_run = False
+        self.selected = []
+        self.auto_added = []
+        self.start("update", [])
 
     def _make_menu(self) -> KeyboardList:
         return KeyboardList(
@@ -652,6 +730,12 @@ class DevboxTUI:
             "Main menu",
             DynamicContainer(self._home_layout),
             "↑↓/j/k Navigate   Enter Open   t Theme   ? Help   q Quit",
+        )
+        self.views["update_prompt"] = self._page(
+            "Update available", HSplit([
+                self._text(self._update_details, height=Dimension(min=5, preferred=9)),
+                self._divider(), self.update_choices.window,
+            ]), "↑↓ Choose   Enter Confirm   y Yes   n No   Esc No",
         )
         self.views["select"] = self._page(
             "Components",
@@ -1063,6 +1147,16 @@ class DevboxTUI:
         def _quit(_event):
             self.quit()
 
+        @kb.add("y", filter=Condition(lambda: self.screen == "update_prompt"), eager=True)
+        @kb.add("Y", filter=Condition(lambda: self.screen == "update_prompt"), eager=True)
+        def _yes_update(_event):
+            self._answer_update(True)
+
+        @kb.add("n", filter=Condition(lambda: self.screen == "update_prompt"), eager=True)
+        @kb.add("N", filter=Condition(lambda: self.screen == "update_prompt"), eager=True)
+        def _no_update(_event):
+            self._answer_update(False)
+
         @kb.add("tab", filter=Condition(lambda: self.screen == "confirm" and bool(self.options.entries)), eager=True)
         def _switch_confirm_focus(_event):
             if self.app.layout.has_focus(self.options.window):
@@ -1088,6 +1182,8 @@ class DevboxTUI:
         if focus is not None:
             self.app.layout.focus(focus)
         self._invalidate()
+        if screen == "home" and self.pending_update is not None and not self.busy:
+            self._show_update_prompt()
 
     def _notice(self, message: str) -> None:
         self.message = message
@@ -1183,7 +1279,7 @@ class DevboxTUI:
 
     def _selection_summary(self) -> str:
         if self.action == "update":
-            return "Update Devbox source\n\nFast-forward only.\nRestart the TUI after updating."
+            return "Update Devbox source\n\nFast-forward only.\nDevbox exits after success; run devbox again to load the new version."
         mode = "DRY RUN (no changes)" if self.dry_run else "Apply selected changes"
         if self.action == "clean":
             lines = [f"Clean: {len(self.selected)} item(s)", mode, ""]
@@ -1265,6 +1361,8 @@ class DevboxTUI:
 
         # Stop read-only workers before executing any mutating job.
         self._cancel_cleaner_scan()
+        if action == "update":
+            self._cancel_update_check()
         # Reserve the slot before creating a task: rapid Enter cannot overlap APT.
         self.busy = True
         self.current_action = action.title() + (" (dry-run)" if self.dry_run and action in ("install", "upgrade", "clean") else "")
@@ -1360,7 +1458,7 @@ class DevboxTUI:
                                  else "Completed successfully.") if code == 0
                                 else f"Failed with exit code {code}.")
             if action == "update" and code == 0:
-                self.last_result += " Restart TUI to load the new source."
+                self.last_result = "Devbox updated successfully. Run devbox again to load the new version."
         except Exception as exc:
             code = 1
             self.last_result = f"Cannot execute {action}: {exc}"
@@ -1384,7 +1482,13 @@ class DevboxTUI:
             self._invalidate_agent_scan()
             self._render_result()
             self._notice(self.last_result)
-            self.navigate("result", self.results_view)
+            if action == "update" and code == 0 and self.app.is_running:
+                self.exit_message = self.last_result
+                if self.log_path is not None:
+                    self.exit_message += f"\nUpdate log: {self.log_path}"
+                self.app.exit()
+            else:
+                self.navigate("result", self.results_view)
 
     def _render_status(self) -> str:
         rows = [f"  {self.current_action or 'Idle'}", ""]
@@ -1481,6 +1585,8 @@ class DevboxTUI:
         elif self.screen == "view_log":
             target = self.previous_screen
             self.navigate(target, self._focus_for(target))
+        elif self.screen == "update_prompt":
+            self._decline_update()
         elif self.screen == "confirm":
             if self.action == "clean":
                 self.navigate("cleaner", self.cleaner_list.window)
@@ -1507,6 +1613,7 @@ class DevboxTUI:
     def _focus_for(self, screen: str):
         return {
             "home": self.menu.window, "select": self.selector.window,
+            "update_prompt": self.update_choices.window,
             "cleaner": self.cleaner_list.window,
             "confirm": self._confirm_focus(), "result": self.results_view,
             "logs": self.log_files.window, "view_log": self.history_view,
@@ -1518,10 +1625,13 @@ class DevboxTUI:
             self._notice("Finish the running task before exiting.")
             return
         self._cancel_cleaner_scan()
+        self._cancel_update_check()
         self.app.exit()
 
     def run(self) -> None:
-        asyncio.run(self.app.run_async())
+        asyncio.run(self.app.run_async(pre_run=self._start_update_check))
+        if self.exit_message:
+            print(self.exit_message)
 
 
 def main() -> None:

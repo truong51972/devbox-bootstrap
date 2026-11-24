@@ -31,8 +31,17 @@ devbox --help
 
 If `~/.local/bin` is not in your `PATH`, use `~/.local/bin/devbox` directly.
 `devbox --update` verifies the expected GitHub origin and branch and refuses
-to overwrite tracked local edits or diverged Git history. Restart the TUI
-after updating source code.
+to overwrite tracked local edits or diverged Git history.
+
+On every interactive launch, Devbox checks upstream main in the background.
+If new commits can be fast-forwarded, the TUI shows the installed and latest
+revisions and asks Yes/No (No is the default; y/n and Esc are supported).
+Offline or unsupported checkouts do not block the menu. If you are using
+another view, the prompt waits until you return to the main menu.
+Both startup Yes and **Update Devbox source** exit the TUI only after source
+and runtime update succeed. The terminal shows the outcome and log path;
+run devbox again to load the new revision. Failures remain in the Result view.
+Set DEVBOX_CHECK_UPDATES=0 to disable the startup check. CLI --update is unchanged.
 
 The keyboard-first TUI starts at a **minimal grouped menu**. Install/Upgrade
 opens a sectioned component list with a contextual details panel, then a
