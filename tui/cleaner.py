@@ -6,11 +6,13 @@ Docker commands are pinned to a local Unix endpoint for each operation.
 from __future__ import annotations
 
 import argparse
+import asyncio
 from dataclasses import asdict, dataclass
 import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -144,15 +146,30 @@ def old_logs():
                 yield path, stat.st_blocks * 512
 
 
-def scan(docker_target=None):
+# Docker inventory is shared by its four rows; package probes are independent.
+PROBE_GROUPS = {
+    "docker": tuple(item.key for item in CLEANERS if item.tool == "docker"),
+    **{item.key: (item.key,) for item in CLEANERS if item.tool != "docker"},
+}
+PROBE_CONCURRENCY = 4
+PROBE_TIMEOUT = 30
+
+
+def scan_group(group, docker_target=None, *, measure=True):
+    keys = PROBE_GROUPS[group]
     rows = []
     docker, docker_error = {}, ""
-    if shutil.which("docker"):
+    if group == "docker" and shutil.which("docker"):
         try:
-            docker = docker_df(docker_target if docker_target is not None else docker_prefix())
+            prefix = docker_target if docker_target is not None else docker_prefix()
+            docker = docker_df(prefix) if measure else {"verified": checked(prefix + ["info", "--format", "{{.ID}}"])}
+            if not docker or not any(docker.values()):
+                raise RuntimeError("Docker inventory unavailable")
         except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
+            docker = {}
             docker_error = str(exc)
-    for item in CLEANERS:
+    for key in keys:
+        item = BY_KEY[key]
         try:
             if item.tool and not shutil.which(item.tool):
                 rows.append(Scan(item.key, False, "-", "Tool not installed"))
@@ -163,24 +180,56 @@ def scan(docker_target=None):
                     continue
                 category = ("Build Cache" if item.key == "docker-build-cache" else
                             "Local Volumes" if item.key == "docker-volumes" else "Images")
-                estimate = docker.get(category, {}).get("Reclaimable", "unknown")
+                estimate = docker.get(category, {}).get("Reclaimable", "unknown") if measure else "not measured"
                 rows.append(Scan(item.key, True, estimate,
                                  "Docker category total; age filters and shared layers reduce actual reclaim."))
                 continue
             if item.key == "devbox-logs":
-                estimate = human(sum(n for _, n in old_logs()))
-            elif item.key == "pip-cache":
-                estimate = size(checked(["python3", "-m", "pip", "cache", "dir"]))
-            elif item.key == "npm-cache":
-                estimate = size(checked(["npm", "config", "get", "cache"]))
-            elif item.key == "uv-cache":
-                estimate = size(checked(["uv", "cache", "dir"]))
+                estimate = human(sum(n for _, n in old_logs())) if measure else "not measured"
             else:
-                estimate = size("/var/cache/apt/archives")
+                commands = {
+                    "pip-cache": ["python3", "-m", "pip", "cache", "dir"],
+                    "npm-cache": ["npm", "config", "get", "cache"],
+                    "uv-cache": ["uv", "cache", "dir"],
+                }
+                path = checked(commands[key]) if key in commands else "/var/cache/apt/archives"
+                estimate = size(path) if measure else "not measured"
             rows.append(Scan(item.key, True, estimate, "Cache footprint; not guaranteed reclaimable."))
         except (OSError, RuntimeError, ValueError, IndexError, subprocess.TimeoutExpired) as exc:
             rows.append(Scan(item.key, False, "-", str(exc)))
     return rows
+
+
+def scan(docker_target=None, *, keys=None, measure=True):
+    requested = set(ORDER if keys is None else keys)
+    return [row for group, members in PROBE_GROUPS.items() if requested.intersection(members)
+            for row in scan_group(group, docker_target, measure=measure) if row.key in requested]
+
+
+async def probe_group(group):
+    """Isolated read-only worker. Kill its process group on timeout/cancel."""
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "tui.cleaner", "--probe-group", group,
+        cwd=Path(__file__).resolve().parents[1],
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        stdin=subprocess.DEVNULL, start_new_session=True,
+    )
+    try:
+        output, _ = await asyncio.wait_for(process.communicate(), PROBE_TIMEOUT)
+        if process.returncode:
+            raise RuntimeError("Inventory worker failed")
+        rows = [Scan(**row) for row in json.loads(output)]
+        if {row.key for row in rows} != set(PROBE_GROUPS[group]):
+            raise RuntimeError("Incomplete inventory")
+        return rows
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        # Child commands (docker, du, etc.) share the worker's process group.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await process.communicate()
+        raise
 
 
 def select_keys(only, all_safe, available):
@@ -226,12 +275,18 @@ def main(argv=None):
     group.add_argument("--all", "--recommended", dest="all_safe", action="store_true",
                        help="select safe available cleaners only")
     group.add_argument("--only", help="comma-separated cleaner IDs")
+    parser.add_argument("--probe-group", choices=PROBE_GROUPS, help=argparse.SUPPRESS)
     parser.add_argument("--scan", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--yes", action="store_true", help="explicitly execute the selected policy")
     parser.add_argument("--allow-risky", action="store_true", help="acknowledge manually selected risky cleaners")
     args = parser.parse_args(argv)
+    if args.probe_group:
+        if args.only or args.all_safe or args.yes or args.allow_risky or args.json or args.scan or args.dry_run:
+            parser.error("Internal inventory probe cannot be combined with cleanup arguments")
+        print(json.dumps([asdict(row) for row in scan_group(args.probe_group)]))
+        return 0
     if args.allow_risky and (not args.only or args.all_safe):
         parser.error("--allow-risky requires explicit --only")
     if args.yes and (args.scan or args.json or args.dry_run or not (args.only or args.all_safe)):
@@ -240,13 +295,28 @@ def main(argv=None):
         parser.error("--json is for inventory only")
     if os.geteuid() == 0:
         parser.error("Run Devbox as a regular user, not root")
+    # Explicit previews need no second inventory; the TUI already scanned.
+    if args.only:
+        try:
+            keys = select_keys(args.only, False, set())
+        except ValueError as exc:
+            parser.error(str(exc))
+        if args.yes and any(key not in SAFE_KEYS for key in keys) and not args.allow_risky:
+            parser.error("Risky cleaners require explicit --only and --allow-risky")
+        if not args.yes:
+            for key in keys:
+                print(f"{key}: {BY_KEY[key].description}")
+                event(key, "PLANNED")
+            print("Preview only; eligibility is checked at execution.")
+            return 0
     target = None
-    if shutil.which("docker"):
+    requested = (keys if args.only else SAFE_KEYS if args.all_safe else ORDER)
+    if any(BY_KEY[key].tool == "docker" for key in requested) and shutil.which("docker"):
         try:
             target = docker_prefix()
         except (OSError, RuntimeError, subprocess.TimeoutExpired):
             pass
-    rows = scan(target)
+    rows = scan(target, keys=requested, measure=not args.yes)
     available = {row.key for row in rows if row.available}
     try:
         keys = select_keys(args.only, args.all_safe, available)

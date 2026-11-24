@@ -213,7 +213,10 @@ https://github.com/DietrichGebert/ponytail .
 ## Developer Cleaner
 
 Open **Cleaner** in the TUI to scan installed tools and known cache locations.
-Press **a (All safe)** to select only safe available cleaners; this also clears
+Rows appear immediately, with independent read-only probes (up to four concurrently)
+and live progress. Slow/unavailable items do not block navigation or selection of
+ready items. Esc cancels the scan when returning home; r starts a new scan after
+completion. Press **a (All safe)** to select only safe currently ready cleaners; this also clears
 any previous manual selection. Space can select a manual item individually.
 Confirmation defaults to dry-run; press d to enable deletion. Manual items
 require a separate acknowledgement. No cleanup runs merely by opening Cleaner.
