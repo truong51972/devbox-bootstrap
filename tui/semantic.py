@@ -39,6 +39,17 @@ def log_fragments(line: str) -> list[tuple[str, str]]:
     return [("class:body", line)]
 
 
+def count_fragments(line: str) -> list[tuple[str, str]]:
+    out = []
+    offset = 0
+    for match in _COUNT.finditer(line):
+        out.extend([("class:muted", line[offset:match.start()]),
+                    (_style(match[1].upper().replace(" ", "_")), match[0])])
+        offset = match.end()
+    out.append(("class:muted", line[offset:]))
+    return out
+
+
 def report_fragments(line: str) -> list[tuple[str, str]]:
     row = _ROW.fullmatch(line)
     if row:
@@ -50,14 +61,7 @@ def report_fragments(line: str) -> list[tuple[str, str]]:
         return [("class:body", heading[1]), (_style(heading[2]), heading[2]),
                 ("class:title", line[heading.end():])]
     if line.strip().startswith("Duration:"):
-        out = []
-        offset = 0
-        for match in _COUNT.finditer(line):
-            out.extend([("class:muted", line[offset:match.start()]),
-                        (_style(match[1].upper().replace(" ", "_")), match[0])])
-            offset = match.end()
-        out.append(("class:muted", line[offset:]))
-        return out
+        return count_fragments(line)
     if line.strip() in _SECTION:
         return [("class:section", line)]
     if line.strip().startswith("Full log:"):
