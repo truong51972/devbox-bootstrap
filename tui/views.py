@@ -56,7 +56,7 @@ class DevboxViews:
             return [("class:header", value)]
 
         def notice_text():
-            return [("class:statusbar", self._truncate(
+            return [(self.message_style, self._truncate(
                 "  " + self.message, max(0, self.columns() - 1)
             ))]
 
