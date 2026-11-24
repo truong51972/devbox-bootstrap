@@ -720,9 +720,13 @@ class DevboxTUI:
 
     def _confirm_mode(self):
         preview = self.dry_run and self.action != "update"
+        requires_consent = (self.action == "clean" and bool(self.options.entries)
+                            and "risk" not in self.options.current_values and not preview)
         return [
-            ("class:warning" if preview else "class:title",
-             "  DRY RUN — no changes\n" if preview else "  APPLY CHANGES — Enter to confirm\n"),
+            ("class:warning" if preview or requires_consent else "class:title",
+             "  DRY RUN — no changes\n" if preview else
+             "  MANUAL CLEANUP — consent required\n" if requires_consent else
+             "  APPLY CHANGES — Enter to confirm\n"),
         ]
 
     def _refresh_confirm_plan(self):
@@ -1120,8 +1124,14 @@ class DevboxTUI:
         self.options = self._make_options(options)
         self._layout_cache.pop("confirm", None)
         self._refresh_confirm_plan()
-        self._notice("Review the plan. Enter applies changes; d previews only." if self.action != "update"
-                     else "Review the plan. Enter updates Devbox.")
+        if self.action == "update":
+            self._notice("Review the plan. Enter updates Devbox.")
+        elif self.dry_run:
+            self._notice("Dry-run ON. Enter previews only; d enables changes.")
+        elif self.action == "clean" and self.options.entries:
+            self._notice("Manual items require consent. Space acknowledges; Enter confirms.")
+        else:
+            self._notice("Review the plan. Enter applies changes; d previews only.")
         self.navigate("confirm", self._confirm_focus())
 
     def _chosen_agents(self) -> list[str]:
