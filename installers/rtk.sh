@@ -48,6 +48,7 @@ for agent in "${DEVBOX_AGENT_TARGETS_ARRAY[@]}"; do
         copilot) init_args=(-g --copilot) ;;
         opencode) init_args=(-g --opencode) ;;
         gemini) init_args=(-g --gemini) ;;
+        agy) init_args=(-g --agent antigravity) ;;
         *) die "Unsupported RTK target: $agent"; return 1 ;;
     esac
     log "Configuring RTK upstream integration for $agent"
