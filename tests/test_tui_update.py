@@ -75,14 +75,16 @@ class StartupUpdateTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_home_update_status_and_revision_details(self):
         app = DevboxTUI()
-        app.menu.index = next(i for i, entry in enumerate(app.menu.entries) if entry.key == "update")
-        self.assertEqual(app.menu.current.status, "Not checked")
+        self.assertEqual(app.menu.current_value, "devbox_info")
+        self.assertEqual(app.menu.current.label, "Info")
+        self.assertEqual(app.menu.current.status, "")
+        self.assertEqual(app.source_update_status, "Not checked")
         for state, label in (("current", "Up to date"), ("dirty", "Update blocked"),
                              ("unsupported", "Update blocked"), ("not-fast-forward", "Update blocked"),
                              ("unavailable", "Check failed"), ("available", "Update available")):
             with patch("tui.app.check_update", return_value=UpdateCheck(state, "old-revision", "new-revision", 2 if state == "available" else 0)):
                 await app._check_startup_update()
-            self.assertEqual(app.menu.current.status, label)
+            self.assertEqual(app.source_update_status, label)
             detail = "".join(value for _, value in app._home_details())
             self.assertIn(label, detail)
             self.assertIn("old-revision", detail)
@@ -90,7 +92,7 @@ class StartupUpdateTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("UTC", detail)
             if state == "available":
                 app._decline_update()
-                self.assertEqual(app.menu.current.status, "Update available")
+                self.assertEqual(app.source_update_status, "Update available")
                 self.assertIsNone(app.pending_update)
         self.assertEqual(next(e.group for e in app.menu.entries if e.key == "environment"), next(e.group for e in app.menu.entries if e.key == "agents"))
         self.assertEqual(next(e.label for e in app.menu.entries if e.key == "settings"), "Settings")
@@ -102,12 +104,12 @@ class StartupUpdateTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(app.update_check_task)
             app._refresh_home_update()
             task = app.update_check_task
-            self.assertEqual(next(e.status for e in app.menu.entries if e.key == "update"), "Checking")
+            self.assertEqual(app.source_update_status, "Checking")
             app._refresh_home_update()
             self.assertIs(app.update_check_task, task)
             await task
             check.assert_awaited_once()
-            self.assertEqual(next(e.status for e in app.menu.entries if e.key == "update"), "Up to date")
+            self.assertEqual(app.source_update_status, "Up to date")
         await app.tasks.close()
 
     async def test_source_update_is_not_duplicated_in_settings(self):
@@ -116,7 +118,7 @@ class StartupUpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(app.screen, "toolkit")
         self.assertIn("legacy:theme", [entry.key for entry in app.toolkit_list.entries])
         self.assertFalse(any(entry.label == "Update Devbox source" for entry in app.toolkit_list.entries))
-        self.assertEqual(sum(entry.key == "update" for entry in app.menu.entries), 1)
+        self.assertFalse(any(entry.key == "update" for entry in app.menu.entries))
         app.open_toolkit()
         updates = [entry for entry in app.toolkit_list.entries if entry.label == "Update Devbox source"]
         self.assertEqual([entry.key for entry in updates], ["workspace:update"])
@@ -126,6 +128,28 @@ class StartupUpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(app.screen, "confirm")
         self.assertEqual(app.action, "update")
         self.assertFalse(app.busy)
+        await app.tasks.close()
+
+    async def test_info_page_and_review_return(self):
+        app = DevboxTUI()
+        app.open_menu()
+        self.assertEqual(app.screen, "devbox_info")
+        self.assertIn("DEVBOX SOURCE", app.devbox_info_view.text)
+        self.assertIn("ENVIRONMENT", app.devbox_info_view.text)
+        app._review_info_update()
+        self.assertEqual(app.screen, "confirm")
+        self.assertEqual(app.action, "update")
+        self.assertFalse(app.busy)
+        app.back()
+        self.assertEqual(app.screen, "devbox_info")
+        with patch("tui.app.check_update", return_value=UpdateCheck("available", "old", "new", 1)):
+            await app._check_startup_update()
+        self.assertEqual(app.screen, "update_prompt")
+        app._decline_update()
+        self.assertEqual(app.screen, "devbox_info")
+        self.assertIn("Update available", app.devbox_info_view.text)
+        app.back()
+        self.assertEqual(app.screen, "home")
         await app.tasks.close()
 
     async def test_update_exits_only_on_success(self):

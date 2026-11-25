@@ -297,7 +297,7 @@ class LayoutTests(unittest.TestCase):
                     task = asyncio.create_task(app.app.run_async())
                     try:
                         await asyncio.sleep(0.10)
-                        pipe.send_text("\r")
+                        pipe.send_text("j\r")
                         await asyncio.sleep(0.10)
                         self.assertEqual(app.screen, "resources")
                         pipe.send_text("e")
@@ -335,7 +335,7 @@ class LayoutTests(unittest.TestCase):
                     task = asyncio.create_task(app.app.run_async())
                     try:
                         await asyncio.sleep(0.10)
-                        pipe.send_text("\r")
+                        pipe.send_text("j\r")
                         await asyncio.sleep(0.10)
                         self.assertEqual(app.screen, "resources")
                         pipe.send_text("e")
@@ -377,7 +377,7 @@ class LayoutTests(unittest.TestCase):
                     task = asyncio.create_task(app.app.run_async())
                     try:
                         await asyncio.sleep(0.1)
-                        pipe.send_text("\r")
+                        pipe.send_text("j\r")
                         await asyncio.sleep(0.10)
                         self.assertEqual(app.screen, "resources")
                         pipe.send_text("e")
@@ -524,7 +524,7 @@ class LayoutTests(unittest.TestCase):
                         task = asyncio.create_task(app.app.run_async())
                         try:
                             await asyncio.sleep(0.10)
-                            pipe.send_text("\r")
+                            pipe.send_text("j\r")
                             await asyncio.sleep(0.10)
                             self.assertEqual(app.screen, "resources")
                             if app.resource_task:

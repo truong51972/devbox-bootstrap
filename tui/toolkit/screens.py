@@ -307,6 +307,7 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
             rows = [r for r in rows if r.group not in ("Environment", "Coding Agents")]
             rows += [Entry("workspace:environment", "Development Tools", "Manage", description="Install, update and inspect tools"),
                      Entry("workspace:agents", "AI Agents", "Manage", description="Install, update and configure AI agents"),
+                     Entry("workspace:devbox_info", "Info", "Devbox", description="Devbox source status and workstation overview"),
                      Entry("workspace:update", "Update Devbox source", "Devbox", description="Fast-forward Devbox and exit on success."),
                      Entry("workspace:favorites", "Favorites", "Quick access", description="Saved actions")]
         for a in ACTIONS:
