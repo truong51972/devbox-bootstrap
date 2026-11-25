@@ -13,7 +13,10 @@ from prompt_toolkit.layout import HSplit, VSplit, DynamicContainer
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.widgets import TextArea
 
-from tui.ui import Entry, KeyboardList
+from tui.ui import Entry, KeyboardList, status_style
+from tui.semantic import FragmentLexer
+from .inventory_view import InventoryList, detail_fragments
+from . import environment, agents
 from tui.views import WIDE_LAYOUT_MIN, detail_panel_width
 from .registry import ACTIONS, BY_ID, execute
 from .operations import prepare, apply
@@ -59,6 +62,15 @@ class ToolkitScreens:
             on_back=self.back, on_help=self._show_help, on_change=self._invalidate,
             on_filter=self._begin_filter, on_favorite=self.toolkit_favorite,
             get_columns=self._component_list_width)
+        self.inventory_list = InventoryList([], on_enter=self.inventory_show_detail,
+            on_back=self.back, on_help=self._show_help, on_change=self._invalidate,
+            on_filter=self._begin_filter, on_refresh=self.inventory_refresh,
+            on_details=self.inventory_show_detail, on_quit=self.quit,
+            get_columns=self.inventory_columns)
+        self.inventory_lexer = FragmentLexer()
+        self.inventory_detail = TextArea(lexer=self.inventory_lexer, read_only=True,
+                                         focusable=True, scrollbar=True, wrap_lines=True)
+        self._bind_text(self.inventory_detail)
         self.toolkit_input = TextArea(multiline=True, scrollbar=True, wrap_lines=True)
         self.toolkit_result = TextArea(read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
         self.toolkit_confirm = KeyboardList(
@@ -93,9 +105,67 @@ class ToolkitScreens:
         ]), "Ctrl+S Run   Enter New line   Esc Back")
         self.views["toolkit_result"] = self._page("Action result", self.toolkit_result,
             "↑↓ Scroll   r Repeat   Enter/Esc Back")
+        for key, title in (("toolkit_tools", "Development tools / Inventory"),
+                           ("toolkit_matrix", "Coding agents / Integrations")):
+            self.views[key] = self._page(title, HSplit([
+                self._text(self.inventory_summary, height=lambda: Dimension.exact(4 if self.columns() < 80 else 3)), self._divider(),
+                DynamicContainer(self.inventory_layout), DynamicContainer(self._filter_layout),
+            ]), "↑↓ Move   / Filter   Enter/i Details   r Refresh   Esc Back")
+        self.views["toolkit_inventory_detail"] = self._page("Inventory / Details", self.inventory_detail,
+            "↑↓ Scroll   Esc Back")
         self.views["toolkit_confirm"] = self._page("Confirm action", HSplit([
             self._text(self.toolkit_confirmation, height=6), self._divider(), self.toolkit_confirm.window,
         ]), "↑↓ Choose   Enter Confirm   Esc Back")
+
+    def inventory_columns(self):
+        return self._component_list_width() if self.columns() >= WIDE_LAYOUT_MIN else self.columns()
+
+    def inventory_screen(self):
+        return "toolkit_matrix" if self.toolkit_key == "agent.integrations" else "toolkit_tools"
+
+    def inventory_summary(self):
+        matrix = self.inventory_list.matrix
+        rows = tuple(self.inventory_list.rows.values())
+        if matrix is not None:
+            out = [("class:title", "  AGENT INTEGRATION MATRIX\n"),
+                   ("class:muted", f"  {sum(row.cli == 'Available' for row in rows)}/{len(rows)} CLI available  ·  RTK binary: "),
+                   (status_style(matrix.binary.state), matrix.binary.state + "\n")]
+            out += [("class:installed", f"  RTK: {sum(row.rtk.state == 'Installed' for row in rows)} registered"),
+                    ("class:muted", "  ·  "),
+                    ("class:installed", f"Ponytail: {sum(row.ponytail.state == 'Installed' for row in rows)} registered"),
+                    ("class:muted", "  ·  Rules = instructions")]
+            return out
+        out = [("class:title", "  DEVELOPMENT TOOL INVENTORY\n")]
+        for state in ("Installed", "Missing", "Partial", "Unverified", "Not checked"):
+            count = sum(row.state == state for row in rows)
+            if count or state in ("Installed", "Missing"):
+                out.append((status_style(state), f"  {count} {state}"))
+        out.append(("class:muted", f"\n  {len(rows)} tools · Local detection only · Enter for details"))
+        return out
+
+    def inventory_layout(self):
+        if self.columns() >= WIDE_LAYOUT_MIN:
+            return self._layout("inventory-wide", lambda: VSplit([
+                self.inventory_list.window, self._divider_v(),
+                self._text(self.inventory_preview, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
+            ], padding=1))
+        return self.inventory_list.window
+
+    def inventory_preview(self):
+        return detail_fragments(self.inventory_list.rows.get(self.inventory_list.current_value))
+
+    def inventory_show_detail(self):
+        if self.inventory_list.current_value is None:
+            return
+        self.inventory_detail.text = self.inventory_lexer.set_fragments(self.inventory_preview())
+        self.navigate("toolkit_inventory_detail", self.inventory_detail)
+
+    def inventory_refresh(self):
+        if self.toolkit_running() or self.busy:
+            self._notice("Inventory check already running.")
+            return
+        self._notice("Refreshing inventory…", style="class:running")
+        self.toolkit_task = asyncio.create_task(self.toolkit_query(self.toolkit_key, ""))
 
     def toolkit_running(self):
         return self.toolkit_task is not None and not self.toolkit_task.done()
@@ -254,6 +324,21 @@ class ToolkitScreens:
                 else:
                     self.toolkit_plan = None
                 return
+            if key in ("env.list", "agent.integrations"):
+                collector = environment.tool_rows if key == "env.list" else agents.agent_matrix
+                snapshot = await asyncio.to_thread(collector)
+                target = self.inventory_screen()
+                if self.screen in ("toolkit_result", target, "toolkit_inventory_detail"):
+                    refresh = self.screen != "toolkit_result"
+                    self.inventory_list.set_snapshot(snapshot, preserve=refresh)
+                    if not refresh:
+                        self.filter_active = False
+                        self.navigate(target, self.inventory_list.window)
+                    if self.screen == "toolkit_inventory_detail":
+                        self.inventory_detail.text = self.inventory_lexer.set_fragments(self.inventory_preview())
+                    self._notice("Inventory checked. Select a row for evidence.", style="class:installed")
+                self.toolkit_recent = [key] + [x for x in self.toolkit_recent if x != key][:9]
+                return
             result = await asyncio.to_thread(execute, key, value, self.toolkit_cwd)
             if self.screen == "toolkit_result":
                 self.toolkit_result.text = safe_text(result)
@@ -264,6 +349,8 @@ class ToolkitScreens:
             if self.screen == "toolkit_result":
                 self.toolkit_result.text = "Action failed: " + ("Invalid input or query failed." if action and action.sensitive else safe_text(str(exc)))
                 self._notice("Action failed.", style="class:error")
+            elif self.screen in ("toolkit_tools", "toolkit_matrix", "toolkit_inventory_detail"):
+                self._notice("Refresh failed; previous inventory retained: " + safe_text(str(exc)), style="class:error")
 
     def toolkit_confirm_action(self):
         if self.toolkit_confirm.current_value != "yes":
@@ -305,7 +392,19 @@ class ToolkitScreens:
             self._invalidate()
 
     def toolkit_back(self):
-        if self.screen == "toolkit":
+        if self.screen == "toolkit_inventory_detail":
+            self.inventory_detail.text = ""
+            self.navigate(self.inventory_screen(), self.inventory_list.window)
+        elif self.screen in ("toolkit_tools", "toolkit_matrix"):
+            if self.filter_active:
+                self._cancel_filter()
+            elif self.inventory_list.query:
+                self.inventory_list.set_query("")
+                self._notice("Filter cleared. Esc returns to actions.")
+            else:
+                self.toolkit_result.text = ""
+                self.navigate("toolkit", self.toolkit_list.window)
+        elif self.screen == "toolkit":
             if self.filter_active:
                 self._cancel_filter()
             elif self.toolkit_list.query:

@@ -5,17 +5,31 @@ import json
 from pathlib import Path
 import shutil
 
-from tui.catalog import COMPONENTS, inventory, with_dependencies, DEPENDENCIES
-from tui.inventory_detail import inspect_components
+from tui.catalog import COMPONENTS, GROUPS, inventory, with_dependencies, DEPENDENCIES
+from tui.inventory_detail import inspect_component_details
+from .inventory_models import ToolRow
 from tui.agent_status import AGENTS
 from .settings import read_json
 
 
-def tools(_value, _cwd):
+def tool_rows():
     states = inventory(quick=True)
-    metadata = inspect_components()
-    return "\n".join(f"{name:<25} {states[code]}\n  {metadata.get(code, 'Ownership/version not verified')}"
-                     for code, name in COMPONENTS) + "\nUse Install/Upgrade for managed operations."
+    metadata = inspect_component_details()
+    categories = {key: group for group, keys in GROUPS for key in keys}
+    return tuple(
+        ToolRow(code, name, categories.get(code, "OTHER"),
+                "Not checked" if states[code] == "Checking" else states[code],
+                *metadata.get(code, ("", "No executable detected" if states[code] == "Missing" else "Ownership/version not verified")),
+                DEPENDENCIES.get(code, ()))
+        for code, name in sorted(COMPONENTS, key=lambda item: next(
+            (i for i, (_, keys) in enumerate(GROUPS) if item[0] in keys), len(GROUPS)))
+    )
+
+
+def tools(_value, _cwd):
+    return "\n".join(f"{row.name:<25} {row.state}\n  " +
+                     (row.path + "\n  " if row.path else "") + row.evidence
+                     for row in tool_rows()) + "\nUse Install/Upgrade for managed operations."
 
 
 def profile_plan(value, cwd):

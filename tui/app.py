@@ -925,6 +925,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self._invalidate()
 
     def _active_list(self) -> KeyboardList:
+        if self.screen in ("toolkit_tools", "toolkit_matrix"):
+            return self.inventory_list
         if self.screen == "toolkit":
             return self.toolkit_list
         if self.screen == "logs":
@@ -1509,6 +1511,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             "home": self.menu.window, "select": self.selector.window,
             "toolkit": self.toolkit_list.window, "toolkit_input": self.toolkit_input,
             "toolkit_result": self.toolkit_result, "toolkit_confirm": self.toolkit_confirm.window,
+            "toolkit_tools": self.inventory_list.window, "toolkit_matrix": self.inventory_list.window,
+            "toolkit_inventory_detail": self.inventory_detail,
             "update_prompt": self.update_choices.window,
             "cleaner": self.cleaner_list.window,
             "confirm": self._confirm_focus(), "result": self.results_view,
