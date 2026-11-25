@@ -253,9 +253,10 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             lexer=SemanticLexer("log"), text="", read_only=True, focusable=True, scrollbar=True,
             wrap_lines=False,
         )
+        self.help_lexer = FragmentLexer()
         self.help_view = TextArea(
-            text=HELP, read_only=True, focusable=True, scrollbar=True,
-            wrap_lines=False,
+            lexer=self.help_lexer, text=HELP, read_only=True, focusable=True, scrollbar=True,
+            wrap_lines=True,
         )
         self.info_lexer = FragmentLexer()
         self.info_view = TextArea(
@@ -925,6 +926,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self._invalidate()
 
     def _active_list(self) -> KeyboardList:
+        if self.screen == "toolkit_table":
+            return self.ux_table
         if self.screen in ("toolkit_tools", "toolkit_matrix"):
             return self.inventory_list
         if self.screen == "toolkit":
@@ -1043,6 +1046,15 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         def _quit(_event):
             self.quit()
 
+        @kb.add("c-k", filter=Condition(lambda: not self.busy and not self.toolkit_running() and self.screen in ("home", "toolkit") and not self.filter_active), eager=True)
+        def _palette(_event):
+            self.open_toolkit()
+            self._begin_filter()
+
+        @kb.add("f1", filter=Condition(lambda: self.screen != "help"), eager=True)
+        def _application_help(_event):
+            self._show_help(application=self.screen != "toolkit_input")
+
         @kb.add("y", filter=Condition(lambda: self.screen == "update_prompt"), eager=True)
         @kb.add("Y", filter=Condition(lambda: self.screen == "update_prompt"), eager=True)
         def _yes_update(_event):
@@ -1060,17 +1072,18 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             else:
                 self.app.layout.focus(self.options.window)
 
-        @kb.add("?", filter=Condition(lambda: self.screen != "help"))
+        @kb.add("?", filter=Condition(lambda: self.screen not in ("help", "toolkit_input") and not self.filter_active))
         def _help(_event):
             self._show_help()
 
         return kb
 
-    def _show_help(self) -> None:
-        if self.busy:
+    def _show_help(self, application=False) -> None:
+        if self.busy or self.toolkit_running():
             self._notice("Help is available when the task has finished.")
             return
         self.help_return_screen = self.screen
+        self.help_view.text = self.help_lexer.set_fragments(self.ux_help(self.screen, application))
         self.navigate("help", self.help_view)
 
     def navigate(self, screen: str, focus=None) -> None:
@@ -1509,7 +1522,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
     def _focus_for(self, screen: str):
         return {
             "home": self.menu.window, "select": self.selector.window,
-            "toolkit": self.toolkit_list.window, "toolkit_input": self.toolkit_input,
+            "toolkit": self.toolkit_list.window, "toolkit_input": self.toolkit_input if self.ux_editor else self.ux_line,
+            "toolkit_table": self.ux_table.window, "toolkit_row_detail": self.ux_detail,
+            "toolkit_raw": self.ux_raw, "toolkit_related": self.ux_related.window,
             "toolkit_result": self.toolkit_result, "toolkit_confirm": self.toolkit_confirm.window,
             "toolkit_tools": self.inventory_list.window, "toolkit_matrix": self.inventory_list.window,
             "toolkit_inventory_detail": self.inventory_detail,

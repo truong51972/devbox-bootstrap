@@ -23,6 +23,9 @@ from .operations import prepare, apply
 from .settings import favorites, toggle_favorite
 from .workflows import list_workflows
 from .native import safe_text
+from .ux import ToolkitUX, action_help, validate_form
+from .guidance import guide_for
+from .collectors import collect
 
 MANAGED = {
     "sys.terminate": ("Terminate process", "System", "Send SIGTERM to a verified user-owned PID.", "PID"),
@@ -47,7 +50,7 @@ LEGACY_ENTRIES = (
 )
 
 
-class ToolkitScreens:
+class ToolkitScreens(ToolkitUX):
     def init_toolkit(self):
         self.toolkit_cwd = os.environ.get("DEVBOX_INVOCATION_CWD") or str(Path.cwd())
         self.toolkit_category = None
@@ -73,6 +76,8 @@ class ToolkitScreens:
         self._bind_text(self.inventory_detail)
         self.toolkit_input = TextArea(multiline=True, scrollbar=True, wrap_lines=True)
         self.toolkit_result = TextArea(read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
+        self.init_ux()
+        self.toolkit_result.control.lexer = self.ux_result_lexer
         self.toolkit_confirm = KeyboardList(
             [Entry("no", "No — go back"), Entry("yes", "Yes — execute this action")],
             on_enter=self.toolkit_confirm_action, on_back=self.back,
@@ -84,6 +89,9 @@ class ToolkitScreens:
         @keys.add("escape", eager=True)
         def _back(_event):
             self.back()
+        @keys.add("tab", eager=True)
+        def _editor_focus(_event):
+            self.app.layout.focus(self.ux_editor_output)
         self.toolkit_input.control.key_bindings = keys
         result_keys = KeyBindings()
         @result_keys.add("escape")
@@ -93,18 +101,36 @@ class ToolkitScreens:
         @result_keys.add("r")
         def _repeat(_event):
             if not self.busy and not self.toolkit_running():
-                self.toolkit_open_action()
+                self.ux_repeat()
+        @result_keys.add("e")
+        def _edit(_event):
+            self.ux_edit()
+        @result_keys.add("v")
+        def _raw(_event):
+            self.ux_show_raw()
+        @result_keys.add("a")
+        def _related(_event):
+            self.ux_open_related()
+        @result_keys.add("?")
+        def _help(_event):
+            self._show_help()
         self.toolkit_result.control.key_bindings = result_keys
 
     def build_toolkit_views(self):
-        self.views["toolkit"] = self._page("Quick actions", HSplit([
-            DynamicContainer(self.toolkit_layout), DynamicContainer(self._filter_layout),
+        self.views["toolkit"] = self._page(lambda: self.toolkit_category or "Quick actions", HSplit([
+            self._text(self.ux_module_intro, height=3), self._divider(), DynamicContainer(self.toolkit_layout), DynamicContainer(self._filter_layout),
         ]), "↑↓ Move   / Search   f Favorite   Enter Open   Esc Back")
-        self.views["toolkit_input"] = self._page("Action input", HSplit([
-            self._text(self.toolkit_prompt, height=3), self._divider(), self.toolkit_input,
-        ]), "Ctrl+S Run   Enter New line   Esc Back")
-        self.views["toolkit_result"] = self._page("Action result", self.toolkit_result,
-            "↑↓ Scroll   r Repeat   Enter/Esc Back")
+        self.views["toolkit_input"] = self._page(lambda: self.ux_path("Input"), DynamicContainer(self.ux_form),
+            lambda: "Ctrl+S Run   Tab Focus   F1 Help   Esc Back" if self.ux_editor else "Enter Run   Tab Next field   F1 Help   Esc Back")
+        self.views["toolkit_result"] = self._page(lambda: self.ux_path("Result"), self.toolkit_result,
+            "↑↓ Scroll   r Repeat   e Edit   a Related   v Raw   ? Help   Esc Back")
+        self.views["toolkit_table"] = self._page(lambda: self.ux_path("Result"), HSplit([
+            self._text(self.ux_table_summary, height=3), self._divider(), self.ux_table.window,
+            DynamicContainer(self._filter_layout),
+        ]), "↑↓ Move   / Filter   s Sort   r Refresh   a Related   i Details   v Raw   ? Help   Esc Back")
+        self.views["toolkit_row_detail"] = self._page(lambda: self.ux_path("Details"), self.ux_detail, "↑↓ Scroll   ? Help   Esc Back")
+        self.views["toolkit_raw"] = self._page(lambda: self.ux_path("Native output"), self.ux_raw, "↑↓ Scroll   Esc Back")
+        self.views["toolkit_related"] = self._page(lambda: self.ux_path("Related actions"), self.ux_related.window, "↑↓ Move   Enter Open   Esc Back")
         for key, title in (("toolkit_tools", "Development tools / Inventory"),
                            ("toolkit_matrix", "Coding agents / Integrations")):
             self.views[key] = self._page(title, HSplit([
@@ -179,8 +205,8 @@ class ToolkitScreens:
                 continue
             if self.toolkit_category == "Favorites" and a.id not in self.toolkit_favorites:
                 continue
-            rows.append(Entry(a.id, a.label, a.category, "★" if a.id in self.toolkit_favorites else "",
-                              a.description + " " + a.id))
+            rows.append(Entry(a.id, a.label, a.category if self.toolkit_category is None else a.guide.group, "★" if a.id in self.toolkit_favorites else "",
+                              " ".join((a.description, a.id, a.guide.use, a.guide.example))))
         for key, (label, category, description, _) in MANAGED.items():
             if self.toolkit_category in (None, category):
                 rows.append(Entry(key, label, category, "", description + " " + key))
@@ -197,6 +223,10 @@ class ToolkitScreens:
     def open_toolkit(self, category=None):
         if self.busy:
             return
+        self.ux_stack.clear()
+        self.ux_result = None
+        self.ux_value = ""
+        self.ux_clear_input()
         self.toolkit_category = category
         try:
             self.toolkit_workflows = list_workflows()
@@ -231,9 +261,9 @@ class ToolkitScreens:
         return [("class:section", "  " + (self.toolkit_category or "ALL ACTIONS").upper() + "\n\n"),
                 ("class:title", "  " + entry.label + "\n\n"),
                 ("class:body", "  " + entry.description + "\n\n"),
-                ("class:muted", "  Mode: " + mode + "\n"),
-                ("class:muted", "  Project: " + self.toolkit_cwd + "\n"),
-                ("class:muted", "  f Favorite · / Search\n")]
+                ("class:muted", "  Mode: " + mode + "\n\n"),
+                *action_help(entry.key),
+                ("class:muted", "\n  ? Help · f Favorite · / Search\n")]
 
     def toolkit_favorite(self):
         key = self.toolkit_list.current_value
@@ -276,6 +306,10 @@ class ToolkitScreens:
         if not key:
             return
         self.toolkit_key = key
+        self.ux_stack.clear()
+        self.ux_result = None
+        self.ux_value = ""
+        self.ux_clear_input()
         self.toolkit_plan = None
         self.toolkit_workflow = None
         self.toolkit_input.text = ""
@@ -298,7 +332,7 @@ class ToolkitScreens:
             self.toolkit_confirm.index = 0
             self.navigate("toolkit_confirm", self.toolkit_confirm.window)
         elif key in MANAGED or BY_ID[key].prompt:
-            self.navigate("toolkit_input", self.toolkit_input)
+            self.ux_open_form()
         else:
             self.toolkit_submit()
 
@@ -306,13 +340,14 @@ class ToolkitScreens:
         if self.toolkit_running() or self.busy:
             return
         key = self.toolkit_key
-        value = self.toolkit_input.text
-        self.toolkit_input.text = ""
         if not key:
             return
-        self.toolkit_result.text = "Checking…" if key in MANAGED else "Running…"
-        self.navigate("toolkit_result", self.toolkit_result)
-        self.toolkit_task = asyncio.create_task(self.toolkit_query(key, value))
+        try:
+            value = validate_form(key, self.ux_input_value())
+        except (ValueError, OverflowError) as exc:
+            self._notice(str(exc), style="class:error")
+            return
+        self.ux_submit_value(key, value)
 
     async def toolkit_query(self, key, value):
         try:
@@ -339,16 +374,32 @@ class ToolkitScreens:
                     self._notice("Inventory checked. Select a row for evidence.", style="class:installed")
                 self.toolkit_recent = [key] + [x for x in self.toolkit_recent if x != key][:9]
                 return
-            result = await asyncio.to_thread(execute, key, value, self.toolkit_cwd)
-            if self.screen == "toolkit_result":
-                self.toolkit_result.text = safe_text(result)
-                self._notice("Completed. Output is not persisted.", style="class:installed")
+            structured = await asyncio.to_thread(collect, key, value, self.toolkit_cwd)
+            if structured is not None:
+                if self.screen in ("toolkit_result", "toolkit_table"):
+                    self.ux_present(structured)
+            else:
+                result = await asyncio.to_thread(execute, key, value, self.toolkit_cwd)
+                if self.screen == "toolkit_input" and self.ux_editor:
+                    self.ux_editor_output.text = safe_text(result)
+                    self._notice("Completed locally. Content is not persisted.", style="class:installed")
+                elif self.screen == "toolkit_result":
+                    self.toolkit_result.text = safe_text(result)
+                    self._notice("Completed. Output is not persisted.", style="class:installed")
             self.toolkit_recent = [key] + [x for x in self.toolkit_recent if x != key][:9]
         except Exception as exc:
             action = BY_ID.get(key)
-            if self.screen == "toolkit_result":
-                self.toolkit_result.text = "Action failed: " + ("Invalid input or query failed." if action and action.sensitive else safe_text(str(exc)))
+            message = "Invalid input or query failed. Check the example and input format." if action and action.sensitive else safe_text(str(exc))
+            if self.screen == "toolkit_input" and self.ux_editor:
+                self.ux_editor_output.text = "Invalid input. Check the format and example."
+                self._notice("Action failed. Edit the input and retry.", style="class:error")
+            elif self.screen == "toolkit_result":
+                self.toolkit_result.text = self.ux_result_lexer.set_fragments([
+                    ("class:error", "  ACTION FAILED\n\n"), ("class:body", "  " + message + "\n\n"),
+                    ("class:section", "  NEXT STEPS\n"), ("class:muted", "  Edit the input, retry, or open contextual help.")])
                 self._notice("Action failed.", style="class:error")
+            elif self.screen == "toolkit_table":
+                self._notice("Refresh failed; previous result retained: " + message, style="class:error")
             elif self.screen in ("toolkit_tools", "toolkit_matrix", "toolkit_inventory_detail"):
                 self._notice("Refresh failed; previous inventory retained: " + safe_text(str(exc)), style="class:error")
 
@@ -392,7 +443,20 @@ class ToolkitScreens:
             self._invalidate()
 
     def toolkit_back(self):
-        if self.screen == "toolkit_inventory_detail":
+        if self.screen == "toolkit_raw":
+            self.ux_raw.text = ""
+            self.navigate(self.ux_raw_parent, self._focus_for(self.ux_raw_parent))
+        elif self.screen == "toolkit_row_detail":
+            self.ux_detail.text = ""
+            self.navigate(self.ux_detail_parent, self._focus_for(self.ux_detail_parent))
+        elif self.screen == "toolkit_related":
+            self.navigate(self.ux_related_parent, self._focus_for(self.ux_related_parent))
+        elif self.screen == "toolkit_table" and self.filter_active:
+            self._cancel_filter()
+        elif self.screen == "toolkit_table" and self.ux_table.query:
+            self.ux_table.set_query("")
+            self._notice("Filter cleared. Esc returns.")
+        elif self.screen == "toolkit_inventory_detail":
             self.inventory_detail.text = ""
             self.navigate(self.inventory_screen(), self.inventory_list.window)
         elif self.screen in ("toolkit_tools", "toolkit_matrix"):
@@ -413,8 +477,11 @@ class ToolkitScreens:
             else:
                 self.navigate("home", self.menu.window)
         else:
-            self.toolkit_input.text = ""
+            self.ux_clear_input()
             self.toolkit_result.text = ""
+            self.ux_result = None
+            self.ux_value = ""
             self.toolkit_plan = None
             self.toolkit_workflow = None
-            self.navigate("toolkit", self.toolkit_list.window)
+            if not self.ux_restore_parent():
+                self.navigate("toolkit", self.toolkit_list.window)
