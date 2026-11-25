@@ -154,7 +154,7 @@ class ToolkitUX:
             key = self.toolkit_list.current_value if screen == "toolkit" else self.toolkit_key
             category = self.toolkit_category or "Quick actions"
             intro, cases = MODULES.get(category, ("Search by action, use case or command.", ()))
-            out += [("class:title", "  " + category.upper() + "\n\n"), ("class:body", "  " + intro + "\n\n")]
+            out += [("class:title", "  " + ("AI Agents" if category == "Coding Agents" else category).upper() + "\n\n"), ("class:body", "  " + intro + "\n\n")]
             if cases:
                 out.append(("class:section", "  COMMON TASKS\n"))
                 for case, action in cases:

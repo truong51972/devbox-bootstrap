@@ -127,7 +127,7 @@ class ToolkitScreens(ToolkitUX):
             self._text(self.ai_setup_summary, height=3), self._divider(),
             DynamicContainer(self.ai_setup_layout), DynamicContainer(self._filter_layout),
         ]), "↑↓ Move   Space Toggle   a Codex preset   / Filter   Enter Review   ? Help   Esc Back")
-        self.views["toolkit"] = self._page(lambda: self.toolkit_category or "Quick actions", HSplit([
+        self.views["toolkit"] = self._page(lambda: "AI Agents" if self.toolkit_category == "Coding Agents" else self.toolkit_category or "Quick actions", HSplit([
             self._text(self.ux_module_intro, height=3), self._divider(), DynamicContainer(self.toolkit_layout), DynamicContainer(self._filter_layout),
         ]), "↑↓ Move   / Search   f Favorite   Enter Open   Esc Back")
         self.views["toolkit_input"] = self._page(lambda: self.ux_path("Input"), DynamicContainer(self.ux_form),
@@ -182,12 +182,15 @@ class ToolkitScreens(ToolkitUX):
 
     def ai_setup_open(self):
         self.ai_setup_active = True
-        self.ai_setup_list.entries = [Entry(item.key, item.title, item.group, agent_setup.state(item), item.description)
-                                      for item in agent_setup.ITEMS]
+        self.ai_setup_refresh_rows()
         self.ai_setup_list.set_query("")
         self.ai_setup_defaults()
         self.filter_active = False
         self.navigate("toolkit_ai_setup", self.ai_setup_list.window)
+
+    def ai_setup_refresh_rows(self):
+        self.ai_setup_list.entries = [Entry(item.key, item.title, item.group, agent_setup.state(item), item.description)
+                                      for item in agent_setup.ITEMS]
 
     def ai_setup_confirm(self):
         if self.busy or self.toolkit_running():
@@ -315,7 +318,7 @@ class ToolkitScreens(ToolkitUX):
             order = {key: index for index, key in enumerate(self.toolkit_recent)}
             rows.sort(key=lambda r: (r.group, r.key not in self.toolkit_favorites, order.get(r.key, 999), r.label))
         else:
-            rows.sort(key=lambda r: (not r.key.startswith("legacy:"), r.group, r.key != "legacy:install", r.label))
+            rows.sort(key=lambda r: (r.key != "legacy:ai-setup", not r.key.startswith("legacy:"), r.group, r.key != "legacy:install", r.label))
         return rows
 
     def open_toolkit(self, category=None):
@@ -573,6 +576,7 @@ class ToolkitScreens(ToolkitUX):
         elif self.ai_setup_active and self.screen in ("toolkit_confirm", "toolkit_result"):
             self.toolkit_workflow = None
             self.toolkit_result.text = ""
+            self.ai_setup_refresh_rows()
             self.navigate("toolkit_ai_setup", self.ai_setup_list.window)
         elif self.screen == "toolkit_raw":
             self.ux_raw.text = ""
