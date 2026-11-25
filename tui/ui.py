@@ -53,6 +53,7 @@ THEMES = {"minimal": STYLE, "mono": MONO_STYLE}
 
 STATUS_STYLES = {
     "Installed": "class:installed",
+    "Up to date": "class:installed",
     "Update available": "class:warning",
     "Update unknown": "class:muted",
     "Update blocked": "class:warning",

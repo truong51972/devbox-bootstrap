@@ -36,7 +36,7 @@ class DevboxViews:
 
     def _page(self, title, body, shortcut):
         compact = {
-            "Overview": "↑↓ Move  Enter Open  Ctrl+K Search  q Quit",
+            "Overview": "↑↓ Move  Enter Open  R Check update  Ctrl+K Search  q Quit",
             "Development Tools": "Space Select  a Missing  u Updates  r Refresh  Enter Review  Esc",
             "AI Agents": "Space Select  a Missing  u Updates  r Refresh  Enter Review  Esc",
             "Components": "↑↓ Move  Space Toggle  / Filter  i Info  r Refresh  Enter Next",
@@ -87,7 +87,7 @@ class DevboxViews:
         self.views["home"] = self._page(
             "Overview",
             DynamicContainer(self._home_layout),
-            "↑↓ Navigate   Enter Open   Ctrl+K Search   t Theme   ? Help   q Quit",
+            "↑↓ Navigate   Enter Open   R Check update   Ctrl+K Search   t Theme   q Quit",
         )
         self.views["update_prompt"] = self._page(
             "Update available", HSplit([
@@ -158,7 +158,7 @@ class DevboxViews:
         if self.rows() >= 26:
             return self._layout("home-medium", lambda: HSplit([
                 self.menu.window, self._divider(),
-                self._text(self._home_details, height=5),
+                self._text(self._home_details, height=lambda: Dimension.exact(10 if self.menu.current_value == "update" else 5)),
             ]))
         return self.menu.window
 

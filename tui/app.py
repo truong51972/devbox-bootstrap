@@ -58,11 +58,11 @@ MENU = (
     ("health", "System Health"),
     ("logs", "Activity"),
     ("update", "Update Devbox source"),
-    ("settings", "Settings & Update"),
+    ("settings", "Settings"),
 )
 MENU_GROUPS = {
     "quick": "QUICK ACCESS", "favorites": "QUICK ACCESS",
-    "environment": "MANAGE", "agents": "AI AGENTS",
+    "environment": "MANAGE", "agents": "MANAGE",
     "network": "INSPECT & OPERATE", "system": "INSPECT & OPERATE",
     "containers": "INSPECT & OPERATE", "storage": "INSPECT & OPERATE",
     "project": "INSPECT & OPERATE", "utilities": "INSPECT & OPERATE",
@@ -88,7 +88,7 @@ MENU_DETAILS = {
     "utilities": "Local text, encoding, IDs and checksums.",
     "workflows": "Preview and launch explicitly approved commands.",
     "health": "Structured diagnostics, Doctor and host preflight.",
-    "settings": "Theme, self-update and preferences.",
+    "settings": "Theme and preferences.",
     "exit": "Leave Devbox without modifying the system.",
 }
 DESCRIPTIONS = {
@@ -198,6 +198,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self.message_style = "class:statusbar"
         self.update_check_task: asyncio.Task[None] | None = None
         self.pending_update: UpdateCheck | None = None
+        self.last_update_check: UpdateCheck | None = None
+        self.last_update_checked_at: datetime | None = None
         self.update_revision = ""
         self.resource_run_origin = None
         self.run_labels = {}
@@ -307,12 +309,21 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         except (AttributeError, ValueError):
             return 24
 
-    def _start_update_check(self) -> None:
-        if os.environ.get("DEVBOX_CHECK_UPDATES", "1") == "0":
+    def _start_update_check(self, *, manual=False) -> None:
+        if not manual and os.environ.get("DEVBOX_CHECK_UPDATES", "1") == "0":
             return
+        if self.busy or self.toolkit_running():
+            return
+        if self.update_check_task is not None and not self.update_check_task.done():
+            self._notice("Devbox update check already running.", style="class:running")
+            return
+        self.pending_update = None
         self._set_source_update_status("Checking")
         self._notice("Checking for Devbox updates...", style="class:running")
         self.update_check_task = self.tasks.start("update", self._check_startup_update())
+
+    def _refresh_home_update(self) -> None:
+        self._start_update_check(manual=True)
 
     def _cancel_update_check(self) -> None:
         if self.update_check_task is not None and not self.update_check_task.done():
@@ -325,9 +336,12 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
 
     async def _check_startup_update(self) -> None:
         result = await check_update(ROOT)
-        self._set_source_update_status({"available": "Update available", "current": "Installed",
-                                        "dirty": "Blocked", "unsupported": "Blocked",
-                                        "not-fast-forward": "Blocked"}.get(result.state, "Check failed"))
+        self.last_update_check = result
+        self.last_update_checked_at = datetime.now(timezone.utc)
+        self.pending_update = None
+        self._set_source_update_status({"available": "Update available", "current": "Up to date",
+                                        "dirty": "Update blocked", "unsupported": "Update blocked",
+                                        "not-fast-forward": "Update blocked"}.get(result.state, "Check failed"))
         if result.state == "available":
             self.pending_update = result
             if self.screen == "home" and not self.busy:
@@ -386,7 +400,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
     def _make_menu(self) -> KeyboardList:
         return KeyboardList(
             [
-                Entry(key, label, MENU_GROUPS[key], description=MENU_DETAILS[key])
+                Entry(key, label, MENU_GROUPS[key], status="Not checked" if key == "update" else "", description=MENU_DETAILS[key])
                 for key, label in MENU
             ],
             on_enter=self.open_menu,
@@ -395,6 +409,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             on_change=self._invalidate,
             on_quit=self.quit,
             on_theme=self.toggle_theme,
+            on_refresh=self._refresh_home_update,
             get_columns=self._component_list_width,
         )
 
@@ -746,10 +761,38 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         if hasattr(self, "app"):
             self.app.invalidate()
 
+    def _source_update_details(self, item):
+        result = self.last_update_check
+        checked = self.last_update_checked_at
+        state = result.state if result else ""
+        status = item.status or "Not checked"
+        reason = {
+            "current": "Installed revision matches upstream.",
+            "available": "A fast-forward update is available.",
+            "dirty": "Local tracked changes; source update blocked.",
+            "unsupported": "Unsupported checkout or remote.",
+            "not-fast-forward": "Local history is ahead or diverged.",
+            "unavailable": "Git check failed or timed out. Press R to retry.",
+        }.get(state, "Press R to check upstream.")
+        if status == "Checking":
+            reason = "Checking upstream; displayed revisions are from the last completed check."
+        return [
+            ("class:title", "  " + item.label + "\n"),
+            (STATUS_STYLES.get(status, "class:muted"), "  " + status + "\n\n"),
+            ("class:body", "  Installed revision: " + (result.current[:12] if result and result.current else "Unknown") + "\n"),
+            ("class:body", "  Upstream revision:  " + (result.latest[:12] if result and result.latest else "Unknown") + "\n"),
+            ("class:body", "  New commits: " + (str(result.commits) if state in ("current", "available") else "Unknown") + "\n"),
+            ("class:muted", "  Last checked: " + (checked.strftime("%Y-%m-%d %H:%M:%S UTC") if checked else "Never") + "\n\n"),
+            ("class:body", "  " + reason + "\n"),
+            ("class:muted", "\n  R Check again · Enter Review update\n  Successful updates exit Devbox."),
+        ]
+
     def _home_details(self):
         item = self.menu.current
         if item is None:
             return [("class:muted", "  No action selected")]
+        if item.key == "update":
+            return self._source_update_details(item)
         return [
             ("class:section", "  SELECTED ACTION\n\n"),
             ("class:title", "  " + item.label + "\n\n"),
