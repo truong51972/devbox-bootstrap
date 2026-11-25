@@ -69,7 +69,7 @@ class TUIBasicTests(unittest.TestCase):
 
     def test_menu_component_confirmation_and_dependencies(self):
         app = DevboxTUI()
-        self.assertEqual(app.menu.current_value, "environment")
+        self.assertEqual(app.menu.current_value, "devbox_info")
         app.open_menu("install")
         self.assertEqual(app.screen, "select")
         app.available["docker"] = "Missing"
@@ -140,7 +140,7 @@ class TUIBasicTests(unittest.TestCase):
                         run = asyncio.create_task(app.app.run_async())
                         try:
                             await asyncio.sleep(0.10)
-                            input_pipe.send_text("\r")
+                            input_pipe.send_text("j\r")
                             await asyncio.sleep(0.10)
                             self.assertEqual(app.screen, "resources")
                             self.assertEqual(app.resource_scope, "development")

@@ -47,6 +47,7 @@ from tui.cleaner import (BY_KEY as CLEANER_ITEMS, SAFE_KEYS, PROBE_GROUPS,
 FINISHED_STATES = FINAL_STATES
 # Stable width across Home, Components and History; remaining columns go to the list.
 MENU = (
+    ("devbox_info", "Info"),
     ("environment", "Development Tools"),
     ("agents", "AI Agents"),
     ("network", "Networking"),
@@ -57,10 +58,10 @@ MENU = (
     ("utilities", "Data & Text Utilities"),
     ("health", "System Health"),
     ("logs", "Activity"),
-    ("update", "Update Devbox source"),
     ("settings", "Settings"),
 )
 MENU_GROUPS = {
+    "devbox_info": "OVERVIEW",
     "quick": "QUICK ACCESS", "favorites": "QUICK ACCESS",
     "environment": "MANAGE", "agents": "MANAGE",
     "network": "INSPECT & OPERATE", "system": "INSPECT & OPERATE",
@@ -69,6 +70,7 @@ MENU_GROUPS = {
     "health": "DEVBOX", "logs": "DEVBOX", "update": "DEVBOX", "settings": "DEVBOX", "exit": "DEVBOX",
 }
 MENU_DETAILS = {
+    "devbox_info": "Devbox version, update status and workstation overview.",
     "install": "Choose development tools and install only what you need.",
     "upgrade": "Update selected tools without changing Devbox source.",
     "doctor": "Check binaries, services, permissions and configuration.",
@@ -200,6 +202,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self.pending_update: UpdateCheck | None = None
         self.last_update_check: UpdateCheck | None = None
         self.last_update_checked_at: datetime | None = None
+        self.source_update_status = "Not checked"
+        self.update_prompt_return = "home"
+        self.source_review_return = "home"
         self.update_revision = ""
         self.resource_run_origin = None
         self.run_labels = {}
@@ -224,6 +229,13 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
              Entry("yes", "Yes — update Devbox and exit")],
             on_enter=self._answer_update, on_back=self._decline_update,
             on_help=self._show_help, on_change=self._invalidate,
+            get_columns=self.columns,
+        )
+        self.devbox_info_actions = KeyboardList(
+            [Entry("check", "Check for updates"), Entry("update", "Review source update"), Entry("back", "Back to Home")],
+            on_enter=self._devbox_info_action, on_back=self.back,
+            on_help=self._show_help, on_change=self._invalidate,
+            on_refresh=self._refresh_home_update, on_update=self._review_info_update,
             get_columns=self.columns,
         )
         self.selector = self._make_selector()
@@ -265,6 +277,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             lexer=self.info_lexer, text="", read_only=True, focusable=True, scrollbar=True,
             wrap_lines=True,
         )
+        self.devbox_info_lexer = FragmentLexer()
+        self.devbox_info_view = TextArea(lexer=self.devbox_info_lexer, text="", read_only=True,
+                                         focusable=True, scrollbar=True, wrap_lines=True)
         self.filter_input = TextArea(
             text="", multiline=False, prompt=" / Filter: ",
             accept_handler=lambda _buffer: self._finish_filter(),
@@ -276,6 +291,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self._bind_text(self.history_view, log_viewer=True)
         self._bind_text(self.help_view)
         self._bind_text(self.info_view)
+        self._bind_text(self.devbox_info_view)
         self._bind_text(self.confirm_plan)
         self._bind_filter()
 
@@ -331,7 +347,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self.pending_update = None
 
     def _set_source_update_status(self, status):
-        self.menu.entries = [replace(entry, status=status) if entry.key == "update" else entry for entry in self.menu.entries]
+        self.source_update_status = status
+        self._refresh_devbox_info()
         self._invalidate()
 
     async def _check_startup_update(self) -> None:
@@ -344,9 +361,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
                                         "not-fast-forward": "Update blocked"}.get(result.state, "Check failed"))
         if result.state == "available":
             self.pending_update = result
-            if self.screen == "home" and not self.busy:
+            if self.screen in ("home", "devbox_info") and not self.busy:
                 self._show_update_prompt()
-        elif self.screen == "home" and not self.busy:
+        elif self.screen in ("home", "devbox_info") and not self.busy:
             message = {
                 "current": "Devbox is up to date. Choose an action.",
                 "dirty": "Update check skipped: local tracked changes. Choose an action.",
@@ -356,8 +373,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             self._notice(message)
 
     def _show_update_prompt(self) -> None:
-        if self.pending_update is None or self.busy or self.screen != "home":
+        if self.pending_update is None or self.busy or self.screen not in ("home", "devbox_info"):
             return
+        self.update_prompt_return = self.screen
         self.update_choices.index = 0
         self._notice("Update available. Choose Yes or No.", style="class:warning")
         self.navigate("update_prompt", self.update_choices.window)
@@ -379,7 +397,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
     def _decline_update(self) -> None:
         self.pending_update = None
         self._notice("Update skipped for this session.")
-        self.navigate("home", self.menu.window)
+        target = self.update_prompt_return
+        self.update_prompt_return = "home"
+        self.navigate(target, self._focus_for(target))
 
     def _answer_update(self, yes: bool | None = None) -> None:
         if self.screen != "update_prompt" or self.pending_update is None or self.busy:
@@ -400,7 +420,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
     def _make_menu(self) -> KeyboardList:
         return KeyboardList(
             [
-                Entry(key, label, MENU_GROUPS[key], status="Not checked" if key == "update" else "", description=MENU_DETAILS[key])
+                Entry(key, label, MENU_GROUPS[key], description=MENU_DETAILS[key])
                 for key, label in MENU
             ],
             on_enter=self.open_menu,
@@ -410,6 +430,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             on_quit=self.quit,
             on_theme=self.toggle_theme,
             on_refresh=self._refresh_home_update,
+            on_update=self._review_info_update,
             get_columns=self._component_list_width,
         )
 
@@ -761,11 +782,11 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         if hasattr(self, "app"):
             self.app.invalidate()
 
-    def _source_update_details(self, item):
+    def _source_update_details(self):
         result = self.last_update_check
         checked = self.last_update_checked_at
         state = result.state if result else ""
-        status = item.status or "Not checked"
+        status = self.source_update_status
         reason = {
             "current": "Installed revision matches upstream.",
             "available": "A fast-forward update is available.",
@@ -777,22 +798,68 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         if status == "Checking":
             reason = "Checking upstream; displayed revisions are from the last completed check."
         return [
-            ("class:title", "  " + item.label + "\n"),
-            (STATUS_STYLES.get(status, "class:muted"), "  " + status + "\n\n"),
+            ("class:section", "  DEVBOX SOURCE\n"),
+            ("class:body", "  Status: "), (STATUS_STYLES.get(status, "class:muted"), status + "\n"),
             ("class:body", "  Installed revision: " + (result.current[:12] if result and result.current else "Unknown") + "\n"),
             ("class:body", "  Upstream revision:  " + (result.latest[:12] if result and result.latest else "Unknown") + "\n"),
             ("class:body", "  New commits: " + (str(result.commits) if state in ("current", "available") else "Unknown") + "\n"),
             ("class:muted", "  Last checked: " + (checked.strftime("%Y-%m-%d %H:%M:%S UTC") if checked else "Never") + "\n\n"),
             ("class:body", "  " + reason + "\n"),
-            ("class:muted", "\n  R Check again · Enter Review update\n  Successful updates exit Devbox."),
+            ("class:muted", "\n  R Check again · U Review update\n  Successful updates exit Devbox.\n"),
         ]
+
+    def _devbox_info_details(self):
+        out = self._source_update_details()
+        out.extend([("class:section", "\n  ENVIRONMENT\n"),
+                    ("class:body", f"  {platform.system()} · {platform.machine()}\n"),
+                    ("class:body", f"  Python {platform.python_version()} · Theme: {self.theme}\n"),
+                    ("class:body", f"  {sum(v == 'Installed' for v in self.available.values())} tools detected\n"),
+                    ("class:body", f"  {sum(v != 'Unavailable' for v in self.ponytail_agents.values())} agent CLIs detected\n")])
+        for scope, label in (("development", "Development Tools"), ("ai", "AI Agents")):
+            cached = self.resource_cache.get(scope)
+            if cached:
+                rows = cached[1]
+                out.extend([("class:body", f"  {label}: "),
+                            ("class:warning", f"{sum(r.bulk_update for r in rows)} update candidates"),
+                            ("class:missing", f" · {sum(r.installation == 'Missing' for r in rows)} missing\n")])
+            else:
+                out.append(("class:muted", f"  {label}: inventory not checked\n"))
+        out.extend([("class:section", "\n  LOCAL STATE\n"),
+                    ("class:body", f"  {len(self.toolkit_favorites)} favorites · {len(self.toolkit_recent)} recent actions\n"),
+                    ("class:muted", f"  Checkout: {ROOT}\n  State: {STATE_ROOT}\n")])
+        return out
+
+    def _refresh_devbox_info(self):
+        if hasattr(self, "devbox_info_view") and self.screen == "devbox_info":
+            self.devbox_info_view.text = self.devbox_info_lexer.set_fragments(self._devbox_info_details())
+
+    def _open_devbox_info(self):
+        if self.busy:
+            return
+        self.devbox_info_actions.index = 0
+        self.navigate("devbox_info", self.devbox_info_actions.window)
+        self._refresh_devbox_info()
+
+    def _review_info_update(self):
+        if self.busy or (self.screen == "home" and self.menu.current_value != "devbox_info"):
+            return
+        self.open_menu("update")
+
+    def _devbox_info_action(self):
+        choice = self.devbox_info_actions.current_value
+        if choice == "check":
+            self._refresh_home_update()
+        elif choice == "update":
+            self._review_info_update()
+        else:
+            self.back()
 
     def _home_details(self):
         item = self.menu.current
         if item is None:
             return [("class:muted", "  No action selected")]
-        if item.key == "update":
-            return self._source_update_details(item)
+        if item.key == "devbox_info":
+            return self._devbox_info_details()
         return [
             ("class:section", "  SELECTED ACTION\n\n"),
             ("class:title", "  " + item.label + "\n\n"),
@@ -1128,6 +1195,21 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             else:
                 self.app.layout.focus(self.options.window)
 
+        @kb.add("tab", filter=Condition(lambda: self.screen == "devbox_info"), eager=True)
+        def _switch_devbox_info_focus(_event):
+            target = self.devbox_info_view if self.app.layout.has_focus(self.devbox_info_actions.window) else self.devbox_info_actions.window
+            self.app.layout.focus(target)
+
+        @kb.add("r", filter=Condition(lambda: self.screen == "devbox_info"), eager=True)
+        @kb.add("R", filter=Condition(lambda: self.screen == "devbox_info"), eager=True)
+        def _refresh_devbox_info_key(_event):
+            self._refresh_home_update()
+
+        @kb.add("u", filter=Condition(lambda: self.screen == "devbox_info"), eager=True)
+        @kb.add("U", filter=Condition(lambda: self.screen == "devbox_info"), eager=True)
+        def _review_devbox_info_key(_event):
+            self._review_info_update()
+
         @kb.add("tab", filter=Condition(lambda: self.screen == "resource_confirm"), eager=True)
         def _switch_resource_confirm_focus(_event):
             targets = [self.resource_confirm.window, self.resource_plan_text]
@@ -1179,6 +1261,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         action = action or self.menu.current_value
         if action == "exit":
             self.quit()
+        elif action == "devbox_info":
+            self._open_devbox_info()
         elif action in ("environment", "agents"):
             self.resource_open("ai" if action == "agents" else "development")
         elif action in ("quick", "favorites", "network", "system", "containers", "storage", "project", "utilities", "workflows", "health", "settings"):
@@ -1210,6 +1294,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         elif action == "logs":
             self.list_history()
         elif action == "update":
+            self.source_review_return = "devbox_info" if self.screen == "devbox_info" else "home"
             self.update_revision = ""
             self.action = action
             self.dry_run = False
@@ -1607,9 +1692,13 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             if self.action == "clean":
                 self.navigate("cleaner", self.cleaner_list.window)
             elif self.action == "update":
-                self.navigate("home", self.menu.window)
+                target = self.source_review_return
+                self.source_review_return = "home"
+                self.navigate(target, self._focus_for(target))
             else:
                 self.navigate("select", self.selector.window)
+        elif self.screen == "devbox_info":
+            self.navigate("home", self.menu.window)
         elif self.screen == "cleaner_info":
             self.navigate("cleaner", self.cleaner_list.window)
         elif self.screen == "info":
@@ -1631,6 +1720,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
     def _focus_for(self, screen: str):
         return {
             "home": self.menu.window, "select": self.selector.window,
+            "devbox_info": self.devbox_info_actions.window,
             "resources": self.resource_list.window, "resource_detail": self.resource_detail,
             "resource_confirm": self.resource_confirm.window, "resource_result": self.resource_result,
             "toolkit_ai_setup": self.ai_setup_list.window,

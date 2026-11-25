@@ -36,7 +36,7 @@ class DevboxViews:
 
     def _page(self, title, body, shortcut):
         compact = {
-            "Overview": "↑↓ Move  Enter Open  R Check update  Ctrl+K Search  q Quit",
+            "Overview": "↑↓ Move  Enter Open  R Check  U Update (Info)  q Quit",
             "Development Tools": "Space Select  a Missing  u Updates  r Refresh  Enter Review  Esc",
             "AI Agents": "Space Select  a Missing  u Updates  r Refresh  Enter Review  Esc",
             "Components": "↑↓ Move  Space Toggle  / Filter  i Info  r Refresh  Enter Next",
@@ -87,8 +87,13 @@ class DevboxViews:
         self.views["home"] = self._page(
             "Overview",
             DynamicContainer(self._home_layout),
-            "↑↓ Navigate   Enter Open   R Check update   Ctrl+K Search   t Theme   q Quit",
+            "↑↓ Navigate   Enter Open   R Check update   U Review (Info)   Ctrl+K Search   q Quit",
         )
+        self.views["devbox_info"] = self._page(
+            "Info", HSplit([self.devbox_info_view, self._divider(), self.devbox_info_actions.window]),
+            "↑↓ Choose  Enter Open  R Check update  U Review update  Tab Scroll  Esc Back",
+        )
+        self.devbox_info_actions.window.height = Dimension(min=3, preferred=4, max=5)
         self.views["update_prompt"] = self._page(
             "Update available", HSplit([
                 self._text(self._update_details, height=Dimension(min=5, preferred=9)),
@@ -158,7 +163,7 @@ class DevboxViews:
         if self.rows() >= 26:
             return self._layout("home-medium", lambda: HSplit([
                 self.menu.window, self._divider(),
-                self._text(self._home_details, height=lambda: Dimension.exact(10 if self.menu.current_value == "update" else 5)),
+                self._text(self._home_details, height=lambda: Dimension.exact(10 if self.menu.current_value == "devbox_info" else 5)),
             ]))
         return self.menu.window
 
