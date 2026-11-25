@@ -65,18 +65,14 @@ class ResourceScreens:
         ]), lambda: self.resource_list.shortcut_hints(Enter="Review", a="Recommended", c="Retry updates", g="Status filter", e="Advanced") + "  Ctrl+K Search")
         self.views["resource_detail"] = self._page("Resource details", self.resource_detail, "↑↓ Scroll  Esc Back")
         self.views["resource_confirm"] = self._page("Review changes", DynamicContainer(self.resource_review_layout),
-            "↑↓ Choose  Enter Confirm  Tab Focus  Space Options  Esc Back")
+            lambda: "↑↓ Choose  Enter Confirm  Tab Focus  Esc Back" + ("  Space Options" if self.resource_options.entries else ""))
         self.views["resource_result"] = self._page("Resource operation result", self.resource_result, "↑↓ Scroll  Esc Back")
 
     def resource_review_layout(self):
-        def build():
-            children = [self.resource_plan_text, self._divider()]
-            if self.resource_options.entries:
-                children.extend([self._text(lambda: [("class:section", "  OPTIONAL PRIVILEGED ACTIONS (OFF BY DEFAULT)")], height=1),
-                                 self.resource_options.window, self._divider()])
-            children.append(self.resource_confirm.window)
-            return HSplit(children)
-        return self._layout("resource-review", build)
+        return self._layout("resource-review", lambda: self._review_body(
+            self.resource_plan_text, options=self.resource_options, choices=self.resource_confirm,
+            consent_title=lambda: "  OPTIONAL PRIVILEGED ACTIONS (OFF BY DEFAULT)",
+        ))
 
     def resource_prepare_confirmation(self):
         self.resource_options.entries = consent_entries(self.resource_operations)
@@ -105,6 +101,7 @@ class ResourceScreens:
 
     def resource_render_rows(self):
         key = self.resource_list.current_value
+        previous_index = self.resource_list.index
         self.resource_list.entries = [Entry(r.key, r.name, r.group, r.status,
             " ".join((r.description, r.installation, r.status, r.manager, r.evidence)), selectable=bool(r.action),
             status_parts=r.status_parts)
@@ -112,7 +109,7 @@ class ResourceScreens:
         if self.resource_filter != "All":
             self.resource_apply_filter()
         self.resource_list.index = next((i for i, e in enumerate(self.resource_list.visible) if e.key == key),
-                                        min(self.resource_list.index, max(0, len(self.resource_list.visible) - 1)))
+                                        min(previous_index, max(0, len(self.resource_list.visible) - 1)))
         self.resource_list.selected.intersection_update(e.key for e in self.resource_list.entries if e.selectable)
         self._invalidate()
 

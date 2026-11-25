@@ -108,7 +108,7 @@ Mouse input is deliberately disabled. No new TUI dependencies are required.
 | ? | Most screens | Show keyboard help |
 | Q | Main menu | Quit |
 
-Development Tools and AI Agents show installation and update state separately. Use g to cycle status filters, u to select verified updates and c to select retryable update checks. Bulk presets preserve selections, including those hidden by filters; review the exact batch before applying it. Settings can persist startup update checks, inventory cache lifetime and the active theme. Environment overrides take precedence.
+Development Tools and AI Agents show installation and update state separately. Use g to cycle status filters, u to select verified updates and c to select retryable update checks. Bulk presets preserve selections, including those hidden by filters; review the exact batch before applying it. Settings can persist startup update checks, inventory cache lifetime and the active theme. Dry-run resource results return to the reviewed plan with Esc; Esc again returns to the resource list. Environment overrides take precedence.
 
 The default theme uses ANSI terminal colors. For monochrome terminals, set
 `DEVBOX_THEME=mono devbox`; `t` toggles themes for the current session.

@@ -89,7 +89,7 @@ class DevboxViews:
         )
         self.views["devbox_info"] = self._page(
             "Info", HSplit([self.devbox_info_view, self._divider(), self.devbox_info_actions.window]),
-            "↑↓ Choose  Enter Open  R Check update  U Review update  Tab Scroll  Esc Back",
+            "↑↓ Choose  Enter Open  R Check update  U Review update  Tab Scroll  Ctrl+K Search  Esc Back",
         )
         self.devbox_info_actions.window.height = Dimension(min=3, preferred=4, max=5)
         self.views["update_prompt"] = self._page(
@@ -129,7 +129,7 @@ class DevboxViews:
                 DynamicContainer(self._logs_layout),
                 DynamicContainer(lambda: self._filter_layout()),
             ]),
-            lambda: self.log_files.shortcut_hints(Enter="View log"),
+            lambda: self.log_files.shortcut_hints(Enter="View log") + "  Ctrl+K Search",
         )
         self.views["view_log"] = self._page(
             "Log viewer", self.history_view,
@@ -219,23 +219,27 @@ class DevboxViews:
                 self.confirm_plan.text = value
         self._invalidate()
 
+    def _review_body(self, plan, *, banner=None, options=None, consent_title=None, choices=None):
+        """Shared review layout; controllers retain their own authorization policy."""
+        children = []
+        if banner is not None:
+            children.extend([self._text(banner, height=1), self._divider()])
+        children.append(plan)
+        if options is not None and options.entries:
+            children.extend([self._divider(),
+                             self._text(lambda: [("class:section", consent_title())], height=1),
+                             options.window])
+            options.window.height = Dimension(min=1, preferred=min(8, len(options.entries) + 2), max=12)
+        if choices is not None:
+            children.extend([self._divider(), choices.window])
+        return HSplit(children)
+
     def _confirm_layout(self):
         def build():
-            # The plan is focusable/scrollable even when there are no options.
-            children = [self._text(self._confirm_mode, height=1), self._divider(),
-                        self.confirm_plan]
-            if self.options.entries:
-                children += [
-                    self._divider(),
-                    self._text(lambda: [("class:section",
-                        "  REQUIRED CONSENT" if self.action == "clean" else
-                        "  OPTIONS (OFF BY DEFAULT)")], height=1),
-                    self.options.window,
-                ]
-                # Allocate only as much space as the actual choices need.
-                self.options.window.height = Dimension(
-                    min=1, preferred=min(8, len(self.options.entries) + 2), max=12)
-            return HSplit(children)
+            return self._review_body(
+                self.confirm_plan, banner=self._confirm_mode, options=self.options,
+                consent_title=lambda: "  REQUIRED CONSENT" if self.action == "clean" else "  OPTIONS (OFF BY DEFAULT)",
+            )
         return self._layout("confirm", build)
 
     def _confirm_focus(self):

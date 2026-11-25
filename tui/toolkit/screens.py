@@ -156,9 +156,9 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
             ]), lambda: self.inventory_list.shortcut_hints(Enter="Details"))
         self.views["toolkit_inventory_detail"] = self._page("Inventory / Details", self.inventory_detail,
             "↑↓ Scroll   Esc Back")
-        self.views["toolkit_confirm"] = self._page("Confirm action", HSplit([
-            self.toolkit_plan_view, self._divider(), self.toolkit_confirm.window,
-        ]), "↑↓ Choose   Enter Confirm   Tab Review plan   Esc Back")
+        self.views["toolkit_confirm"] = self._page("Review changes",
+            self._review_body(self.toolkit_plan_view, choices=self.toolkit_confirm),
+            "↑↓ Choose   Enter Confirm   Tab Review plan   Esc Back")
         self.toolkit_confirm.window.height = Dimension(min=2, preferred=3, max=4)
 
     def ai_setup_summary(self):
@@ -655,11 +655,13 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
                 self.toolkit_list.set_query("")
                 self._notice("Filter cleared. Esc returns home.")
             else:
+                if self.restore_palette_origin():
+                    return
                 if self.resource_advanced_parent:
                     self.resource_advanced_parent = False
                     self.navigate("resources", self.resource_list.window)
                     self.resource_refresh(force=True)
-                elif not self.restore_palette_origin():
+                else:
                     self.navigate("home", self.menu.window)
         else:
             self.ux_clear_input()

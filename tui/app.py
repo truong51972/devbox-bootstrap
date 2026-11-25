@@ -693,6 +693,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         done = len(self.cleaner_rows)
         total = len(CLEANER_ITEMS)
         ready = sum(row.available for row in self.cleaner_rows.values())
+        safe_ready = sum(row.available and key in SAFE_KEYS for key, row in self.cleaner_rows.items())
         selected = self.cleaner_list.current_values
         manual = sum(key not in SAFE_KEYS for key in selected)
         pending = len(SAFE_KEYS - self.cleaner_rows.keys()) if self._cleaner_all_pending() else 0
@@ -702,7 +703,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             ("class:running" if done < total else "class:checked",
              f"  {'Scanning' if done < total else 'Scan complete'} "
              f"[{'#' * filled}{'.' * (width - filled)}] {done}/{total}\n"),
-            ("class:installed", f"  Ready {ready}"),
+            ("class:installed", f"  Ready {ready} ({safe_ready} safe)"),
             ("class:body", f" | Selected {len(selected)} ("),
             ("class:warning" if manual else "class:muted", f"{manual} manual"),
             ("class:body", ")" + (f" | All safe: {pending} pending" if pending else
@@ -778,6 +779,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             on_help=self._show_help,
             on_change=self._invalidate,
             on_filter=self._begin_filter,
+            on_details=lambda: self._show_preview(self._history_details),
             get_columns=self._component_list_width,
         )
 
