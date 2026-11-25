@@ -376,3 +376,16 @@ CI also runs ShellCheck. Tests do not perform real package installations.
 New TUI runs save a versioned JSON summary next to the raw log, including action, duration, exit code, dry-run, per-component states and reported cleaner details. Old logs remain readable. Result distinguishes preview, partial, failed and successful execution; disk-footprint changes are not summed as guaranteed physical storage reclaimed. Background discovery tasks are owned and cancelled on exit, and the existing view layout lives in a separate presentation module. No additional dependencies are required.
 
 The compatibility job runs Python tests on Ubuntu 22.04 and 24.04; the main job runs shell and Python checks. Local Git integration uses disposable repositories and does not contact the network. UI tests check that construction and repeated detail rendering never invoke external commands. Ownership metadata is loaded in the existing background inventory scan; an unknown manager is not assumed to be Devbox-owned. Native operation cancellation is intentionally not exposed while package transactions run. Actual WSL and Docker cleanup measurements remain manual validation steps.
+
+## AI Agents setup
+
+Open **AI Agents → Setup AI agents & skills**. The recommended preset (press `a`) selects Codex, RTK, Ponytail, Skills CLI, and the six current Coding Kit skills. Other coding agent CLIs are optional and never selected by the preset. Space toggles items, Enter reviews the exact plan, and Yes applies it. Dependencies are included automatically. Integrations and skill installs target Codex globally; use the existing per-agent integration actions for other agents. Existing executable installations are preserved. Antigravity remains discoverable and configurable when installed externally.
+
+```bash
+devbox agent setup                            # preview preset
+devbox agent setup --yes                      # apply preset
+devbox agent setup codex skill:context-management # preview subset
+devbox agent setup copilot --yes              # optional CLI only
+```
+
+Node.js and npm are prerequisites (Skills CLI needs Node.js >=22.20). The installer does not log in, configure authentication, automatically enable optional Coding Kit hooks, or upgrade existing CLIs. Packages and skills are downloaded from their upstream sources when explicitly confirmed. The preset uses explicit skill names and `-a codex`, never upstream `--all`.

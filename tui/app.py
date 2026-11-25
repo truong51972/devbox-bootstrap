@@ -50,7 +50,7 @@ MENU = (
     ("quick", "Quick Actions"),
     ("favorites", "Favorites"),
     ("environment", "Development Tools"),
-    ("agents", "Coding Agents"),
+    ("agents", "AI Agents"),
     ("network", "Networking"),
     ("system", "System Utilities"),
     ("containers", "Containers"),
@@ -64,7 +64,7 @@ MENU = (
 )
 MENU_GROUPS = {
     "quick": "QUICK ACCESS", "favorites": "QUICK ACCESS",
-    "environment": "MANAGE", "agents": "MANAGE",
+    "environment": "MANAGE", "agents": "AI AGENTS",
     "network": "INSPECT & OPERATE", "system": "INSPECT & OPERATE",
     "containers": "INSPECT & OPERATE", "storage": "INSPECT & OPERATE",
     "project": "INSPECT & OPERATE", "utilities": "INSPECT & OPERATE",
@@ -81,7 +81,7 @@ MENU_DETAILS = {
     "quick": "Search all local developer actions.",
     "favorites": "Open your saved read-only actions.",
     "environment": "Inspect tools, ownership and desired-state profiles.",
-    "agents": "Inspect agent CLIs, integrations and skills.",
+    "agents": "Install agent CLIs, configure integrations and manage reusable skills.",
     "network": "Ports, IP, DNS, connectivity and TLS.",
     "system": "Processes, GPU, services, PATH and SSH.",
     "containers": "Inspect and operate local Docker containers.",
@@ -927,6 +927,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self._invalidate()
 
     def _active_list(self) -> KeyboardList:
+        if self.screen == "toolkit_ai_setup":
+            return self.ai_setup_list
         if self.screen == "toolkit_table":
             return self.ux_table
         if self.screen in ("toolkit_tools", "toolkit_matrix"):
@@ -1112,7 +1114,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self.app.style = Style.from_dict(THEMES[self.theme])
         self._notice(f"Theme: {self.theme}. Set DEVBOX_THEME={self.theme} to keep it on launch.")
 
-    def open_menu(self, action=None) -> None:
+    def open_menu(self, action=None, *, scope=None) -> None:
         action = action or self.menu.current_value
         if action == "exit":
             self.quit()
@@ -1130,6 +1132,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             self.dry_run = False
             # Preserve last inventory while navigating; refresh lazily after TTL.
             self.selector = self._make_selector()
+            if scope in ("ai", "development"):
+                from .toolkit.agent_setup import EXTENSIONS
+                self.selector.entries = [e for e in self.selector.entries if (e.key in EXTENSIONS) == (scope == "ai")]
             self._layout_cache.pop("select-wide", None)
             self._layout_cache.pop("select-medium", None)
             self.filter_active = False
@@ -1530,6 +1535,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
     def _focus_for(self, screen: str):
         return {
             "home": self.menu.window, "select": self.selector.window,
+            "toolkit_ai_setup": self.ai_setup_list.window,
             "toolkit": self.toolkit_list.window, "toolkit_input": self.toolkit_input if self.ux_editor else self.ux_line,
             "toolkit_table": self.ux_table.window, "toolkit_row_detail": self.ux_detail,
             "toolkit_raw": self.ux_raw, "toolkit_related": self.ux_related.window,

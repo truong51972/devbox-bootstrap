@@ -142,8 +142,8 @@ class ToolkitUX:
         return category + " / " + self.ux_title() + (" / " + suffix if suffix else "")
 
     def ux_module_intro(self):
-        title = self.toolkit_category or "Quick actions"
-        intro = MODULES.get(title, ("Search the complete action catalog by goal, name or command.", ()))[0]
+        title = "AI Agents" if self.toolkit_category == "Coding Agents" else self.toolkit_category or "Quick actions"
+        intro = MODULES.get(self.toolkit_category, ("Search the complete action catalog by goal, name or command.", ()))[0]
         return [("class:title", "  " + title.upper() + "\n"),
                 ("class:body", "  " + intro + "\n"),
                 ("class:muted", "  Select an action for examples and limitations. ? Help")]
@@ -154,7 +154,7 @@ class ToolkitUX:
             key = self.toolkit_list.current_value if screen == "toolkit" else self.toolkit_key
             category = self.toolkit_category or "Quick actions"
             intro, cases = MODULES.get(category, ("Search by action, use case or command.", ()))
-            out += [("class:title", "  " + category.upper() + "\n\n"), ("class:body", "  " + intro + "\n\n")]
+            out += [("class:title", "  " + ("AI Agents" if category == "Coding Agents" else category).upper() + "\n\n"), ("class:body", "  " + intro + "\n\n")]
             if cases:
                 out.append(("class:section", "  COMMON TASKS\n"))
                 for case, action in cases:

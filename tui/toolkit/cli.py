@@ -11,6 +11,7 @@ from .registry import ACTIONS, BY_ID, execute
 from .guidance import guide_for, command_example
 from .operations import prepare, apply
 from .workflows import list_workflows, run
+from . import agent_setup
 
 ROOT = Path(__file__).resolve().parents[2]
 MANAGED = {"sys.terminate", "docker.start", "docker.stop", "docker.restart"}
@@ -54,7 +55,7 @@ def main(argv=None):
             for action in ACTIONS:
                 print(f"{action.id.replace('.', ' ', 1):<30} {action.description}")
             print("\nManaged: sys terminate PID, docker start|stop|restart CONTAINER (preview unless --yes)")
-            print("Other: env install|upgrade, agent integrate, storage scan|clean, health doctor|preflight, run [ID] [--yes]")
+            print("Other: env install|upgrade, agent setup|integrate, storage scan|clean, health doctor|preflight, run [ID] [--yes]")
             return 0
         if len(argv) >= 2 and argv[-1] in ("--help", "-h"):
             key = ".".join(argv[:-1])
@@ -71,6 +72,22 @@ def main(argv=None):
                         print(command_example(action.id, action.guide), "—", action.description)
                     return 0
         legacy(argv)
+        if argv[:2] == ["agent", "setup"]:
+            args = argv[2:]
+            confirmed = bool(args and args[-1] == "--yes")
+            if confirmed:
+                args.pop()
+            if args == ["--help"]:
+                for item in agent_setup.ITEMS:
+                    print(item.key, "—", item.description)
+                return 0
+            workflow = agent_setup.plan(args or agent_setup.DEFAULT)
+            print(workflow.description, flush=True)
+            print(shlex.join(workflow.command), flush=True)
+            if confirmed:
+                return run(workflow, cwd)
+            print("Preview only. Add --yes to execute.")
+            return 0
         if argv[:2] == ["agent", "integrate"]:
             from tui.agent_status import AGENTS
             args = argv[2:]

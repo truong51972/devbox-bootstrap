@@ -10,6 +10,7 @@ from tui.inventory_detail import inspect_component_details
 from .inventory_models import ToolRow
 from tui.agent_status import AGENTS
 from .settings import read_json
+from .agent_setup import EXTENSIONS
 
 
 def tool_rows():
@@ -23,6 +24,7 @@ def tool_rows():
                 DEPENDENCIES.get(code, ()))
         for code, name in sorted(COMPONENTS, key=lambda item: next(
             (i for i, (_, keys) in enumerate(GROUPS) if item[0] in keys), len(GROUPS)))
+        if code not in EXTENSIONS
     )
 
 
