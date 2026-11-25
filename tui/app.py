@@ -750,7 +750,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             ("class:body", f"  {platform.system()} · {platform.machine()}\n"),
             ("class:body", f"  {sum(v == 'Installed' for v in self.available.values())} tools detected\n"),
             ("class:body", f"  {sum(v != 'Unavailable' for v in self.ponytail_agents.values())} agent CLIs detected\n"),
-            ("class:muted", "  Ctrl+K Search all actions · Enter Open"),
+            ("class:body", f"  {len(self.toolkit_favorites)} favorites · {len(self.toolkit_recent)} recent actions\n"),
+            ("class:muted", "  Ctrl+K Search all actions · ? Help · Enter Open"),
         ]
 
     def _component_details(self, *, full: bool = False):
@@ -1083,10 +1084,17 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             self._notice("Help is available when the task has finished.")
             return
         self.help_return_screen = self.screen
+        self.ux_help_focus = self.app.layout.current_window
         self.help_view.text = self.help_lexer.set_fragments(self.ux_help(self.screen, application))
         self.navigate("help", self.help_view)
 
     def navigate(self, screen: str, focus=None) -> None:
+        if (screen == "home" and getattr(self, "ux_legacy_parent", None)
+                and self.screen in ("select", "confirm", "result", "logs", "cleaner", "info", "cleaner_info")):
+            screen = self.ux_legacy_parent
+            self.ux_legacy_parent = None
+            focus = self._focus_for(screen)
+            self.filter_active = False
         self.screen = screen
         if focus is not None:
             self.app.layout.focus(focus)
@@ -1490,7 +1498,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             return
         if self.screen == "help":
             target = self.help_return_screen
-            self.navigate(target, self._focus_for(target))
+            self.navigate(target, self.ux_help_focus or self._focus_for(target))
         elif self.screen == "view_log":
             target = self.previous_screen
             self.navigate(target, self._focus_for(target))

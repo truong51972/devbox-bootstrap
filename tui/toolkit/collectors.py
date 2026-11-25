@@ -203,10 +203,28 @@ def collect(key, value, cwd):
         rows = []
         for a in AGENTS:
             path = shutil.which(a)
-            rows.append((LABELS[a], Cell("Available" if path else "Unavailable", "installed" if path else "muted"), path or "—"))
-        return table(("Agent", "CLI", "Executable"), rows, "Coding agent discovery")
+            rows.append((LABELS[a], a, Cell("Available" if path else "Unavailable", "installed" if path else "muted"), path or "—"))
+        return table(("Agent", "Agent ID", "CLI", "Executable"), rows, "Coding agent discovery")
     if key == "project.detect":
         path = Path(cwd)
         rows = [(name,) for name in system.PROJECT_MARKERS if (path / name).exists()]
         return table(("Detected marker",), rows, str(path), notes=("Project scripts are not executed.",))
+    if key == "agent.version":
+        raw = agents.version(value, cwd)
+        return report((("Agent", value), ("Reported version", raw)), "Agent version", raw)
+    if key in ("agent.skills", "agent.skill-updates"):
+        raw = agents.skills(value, cwd) if key == "agent.skills" else agents.skill_updates(value, cwd)
+        return Result(TextData(raw, "text"), "Skills CLI report", raw, notes=("Native report; no changes applied.",))
+    if key == "env.profile":
+        raw = environment.profile_plan(value, cwd)
+        return Result(TextData(raw), "Desired-state preview", raw, tone="warning", notes=("No changes applied.",))
+    if key == "project.git":
+        raw = system.git_status(value, cwd)
+        lines = _lines(raw)
+        branch = next((line[3:] for line in lines if line.startswith("## ")), "Unknown")
+        rows = [(line[:2], line[3:]) for line in lines if not line.startswith("## ") and len(line) >= 3]
+        return table(("State", "Tracked path"), rows, "Branch: " + branch, raw, ("Untracked files are excluded.",))
+    if key == "health.json":
+        raw = health.report_json(value, cwd)
+        return Result(TextData(raw, "json"), "Diagnostic JSON", raw)
     return None

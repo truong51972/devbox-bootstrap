@@ -122,7 +122,7 @@ class ToolkitScreens(ToolkitUX):
         ]), "↑↓ Move   / Search   f Favorite   Enter Open   Esc Back")
         self.views["toolkit_input"] = self._page(lambda: self.ux_path("Input"), DynamicContainer(self.ux_form),
             lambda: "Ctrl+S Run   Tab Focus   F1 Help   Esc Back" if self.ux_editor else "Enter Run   Tab Next field   F1 Help   Esc Back")
-        self.views["toolkit_result"] = self._page(lambda: self.ux_path("Result"), self.toolkit_result,
+        self.views["toolkit_result"] = self._page(lambda: self.ux_path("Result"), HSplit([self._text(self.ux_result_summary, height=3), self._divider(), self.toolkit_result]),
             "↑↓ Scroll   r Repeat   e Edit   a Related   v Raw   ? Help   Esc Back")
         self.views["toolkit_table"] = self._page(lambda: self.ux_path("Result"), HSplit([
             self._text(self.ux_table_summary, height=3), self._divider(), self.ux_table.window,
@@ -224,6 +224,7 @@ class ToolkitScreens(ToolkitUX):
         if self.busy:
             return
         self.ux_stack.clear()
+        self.ux_legacy_parent = None
         self.ux_result = None
         self.ux_value = ""
         self.ux_clear_input()
@@ -315,6 +316,8 @@ class ToolkitScreens(ToolkitUX):
         self.toolkit_input.text = ""
         if key.startswith("legacy:"):
             action = key[7:]
+            if action != "theme":
+                self.ux_legacy_parent = "toolkit"
             if action == "theme":
                 self.toggle_theme()
             elif action in ("rtk-install", "ponytail-install"):
@@ -381,14 +384,17 @@ class ToolkitScreens(ToolkitUX):
             else:
                 result = await asyncio.to_thread(execute, key, value, self.toolkit_cwd)
                 if self.screen == "toolkit_input" and self.ux_editor:
-                    self.ux_editor_output.text = safe_text(result)
+                    self.ux_editor_output.text = result
+                    self.ux_phase = "Completed"
                     self._notice("Completed locally. Content is not persisted.", style="class:installed")
                 elif self.screen == "toolkit_result":
                     self.toolkit_result.text = safe_text(result)
+                    self.ux_phase = "Completed"
                     self._notice("Completed. Output is not persisted.", style="class:installed")
             self.toolkit_recent = [key] + [x for x in self.toolkit_recent if x != key][:9]
         except Exception as exc:
             action = BY_ID.get(key)
+            self.ux_phase = "Failed"
             message = "Invalid input or query failed. Check the example and input format." if action and action.sensitive else safe_text(str(exc))
             if self.screen == "toolkit_input" and self.ux_editor:
                 self.ux_editor_output.text = "Invalid input. Check the format and example."
@@ -415,6 +421,7 @@ class ToolkitScreens(ToolkitUX):
         self.toolkit_plan = None
         self.toolkit_workflow = None
         self.busy = True
+        self.ux_phase = "Running"
         self.toolkit_result.text = "Running confirmed action…"
         self.navigate("toolkit_result", self.toolkit_result)
         self.toolkit_task = asyncio.create_task(self.toolkit_apply(plan, workflow))
@@ -434,8 +441,10 @@ class ToolkitScreens(ToolkitUX):
             else:
                 result = await asyncio.to_thread(apply, plan, self.toolkit_cwd)
             self.toolkit_result.text = safe_text(result)
+            self.ux_phase = "Completed"
             self._notice("Completed.", style="class:installed")
         except Exception as exc:
+            self.ux_phase = "Failed"
             self.toolkit_result.text = "Action failed: " + safe_text(str(exc))
             self._notice("Action failed.", style="class:error")
         finally:

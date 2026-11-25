@@ -90,6 +90,9 @@ class ToolkitUX:
         self.ux_related_parent = "toolkit_result"
         self.ux_targets = {}
         self.ux_stack = []
+        self.ux_legacy_parent = None
+        self.ux_help_focus = None
+        self.ux_phase = "Ready"
         for field in (self.ux_line, self.ux_port):
             bindings = KeyBindings()
             @bindings.add("enter", eager=True)
@@ -182,6 +185,7 @@ class ToolkitUX:
         self.ux_editor_output.text = ""
         self.ux_line.text = ""
         self.ux_port.text = ""
+        self._layout_cache.pop("ux-form", None)
         self.ux_line.buffer.completer = None
         if self.ux_form_kind == "path":
             self.ux_line.buffer.completer = PathCompleter(expanduser=True, get_paths=lambda: [self.toolkit_cwd])
@@ -204,8 +208,11 @@ class ToolkitUX:
         self.navigate("toolkit_input", self.toolkit_input if self.ux_editor else self.ux_line)
 
     def ux_form(self):
+        return self._layout("ux-form", self._build_ux_form)
+
+    def _build_ux_form(self):
         if self.ux_editor:
-            return HSplit([self._text(lambda: [("class:section", "  INPUT   ·   Ctrl+S run")], height=1),
+            return HSplit([self._text(lambda: [("class:section", "  INPUT   ·   Ctrl+S run"), ("class:muted", "   " + guide_for(self.toolkit_key).limit)], height=2),
                            DynamicContainer(self.ux_editor_layout)])
         guide = guide_for(self.toolkit_key)
         fields = [self._text(lambda: [("class:section", "  Hostname or IP" if self.ux_form_kind in ("endpoint", "tls") else "  " + (BY_ID[self.toolkit_key].prompt if self.toolkit_key in BY_ID else "Exact target"))], height=1), self.ux_line]
@@ -218,10 +225,11 @@ class ToolkitUX:
         return HSplit(fields)
 
     def ux_editor_layout(self):
-        output = HSplit([self._text(lambda: [("class:section", "  OUTPUT   ·   Ctrl+C copy (output focus)")], height=1), self.ux_editor_output])
+        def output():
+            return HSplit([self._text(lambda: [("class:section", "  OUTPUT   ·   Ctrl+C copy (output focus)")], height=1), self.ux_editor_output])
         if self.columns() >= WIDE_LAYOUT_MIN:
-            return VSplit([self.toolkit_input, self._divider_v(), output], padding=1)
-        return HSplit([self.toolkit_input, self._divider(), output])
+            return self._layout("ux-editor-wide", lambda: VSplit([self.toolkit_input, self._divider_v(), output()], padding=1))
+        return self._layout("ux-editor-narrow", lambda: HSplit([self.toolkit_input, self._divider(), output()]))
 
     def ux_input_value(self):
         if self.ux_editor:
@@ -240,11 +248,13 @@ class ToolkitUX:
         self.ux_editor_output.text = ""
         self.ux_editor = False
         self.ux_form_kind = "none"
+        self._layout_cache.pop("ux-form", None)
 
     def ux_submit_value(self, key, value):
         action = BY_ID.get(key)
         self.ux_value = "" if action and action.sensitive else value
         self.ux_result = None
+        self.ux_phase = "Running"
         if self.ux_editor:
             self.ux_editor_output.text = "Running…"
         else:
@@ -278,6 +288,7 @@ class ToolkitUX:
 
     def ux_present(self, result):
         self.ux_result = result
+        self.ux_phase = "Completed" if result.tone != "error" else "Check result"
         if isinstance(result.data, TableData):
             preserve = self.screen == "toolkit_table"
             self.ux_table.set_data(result.data, preserve=preserve)
@@ -287,6 +298,12 @@ class ToolkitUX:
         else:
             self.toolkit_result.text = self.ux_result_lexer.set_fragments(fragments(result, self.columns()))
         self._notice(result.summary, style="class:" + result.tone)
+
+    def ux_result_summary(self):
+        guide = guide_for(self.toolkit_key)
+        tone = {"Running": "running", "Completed": "installed", "Failed": "error", "Check result": "warning"}.get(self.ux_phase, "muted")
+        return [("class:title", "  " + self.ux_title() + "\n"), ("class:" + tone, "  " + self.ux_phase + "\n"),
+                ("class:muted", "  " + (guide.result if guide else "Review the operation outcome."))]
 
     def ux_table_summary(self):
         result = self.ux_result
@@ -341,7 +358,9 @@ class ToolkitUX:
             elif key == "net.port":
                 target = values.get("Port", "")
             elif key == "agent.version":
-                continue
+                target = values.get("Agent ID", "")
+                if not target:
+                    continue
             self.ux_targets[key] = target
             entries.append(Entry(key, BY_ID[key].label if key in BY_ID else key, description=target))
         if not entries:
@@ -358,7 +377,7 @@ class ToolkitUX:
         action = BY_ID.get(self.toolkit_key)
         if action and not action.sensitive:
             self.ux_stack.append((self.toolkit_key, self.ux_value, self.ux_result, self.ux_related_parent,
-                                  self.ux_table.query, self.ux_table.index))
+                                  self.ux_table.query, self.ux_table.index, self.ux_table.sort_column, self.ux_table.row))
         self.toolkit_key = key
         self.ux_result = None
         self.ux_value = ""
@@ -372,13 +391,16 @@ class ToolkitUX:
     def ux_restore_parent(self):
         if not self.ux_stack:
             return False
-        key, value, result, screen, query, index = self.ux_stack.pop()
+        key, value, result, screen, query, index, sort_column, row = self.ux_stack.pop()
         self.toolkit_key, self.ux_value, self.ux_result = key, value, result
         if screen == "toolkit_table" and result and isinstance(result.data, TableData):
             self.ux_table.set_data(result.data)
             self.ux_table.set_query(query)
-            self.ux_table.index = min(index, max(0, len(self.ux_table.visible) - 1))
+            if sort_column >= 0:
+                self.ux_table.sort_by(sort_column)
+            self.ux_table.index = next((i for i, entry in enumerate(self.ux_table.visible) if self.ux_table.data.rows[int(entry.key)] == row), min(index, max(0, len(self.ux_table.visible) - 1)))
         elif result:
             self.toolkit_result.text = self.ux_result_lexer.set_fragments(fragments(result, self.columns()))
+        self.ux_phase = "Completed"
         self.navigate(screen, self._focus_for(screen))
         return True

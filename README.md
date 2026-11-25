@@ -4,7 +4,7 @@ A local-first, keyboard-first developer convenience toolkit for Linux and WSL. I
 
 ## Daily toolkit
 
-Open `devbox` and use Overview categories, Quick Actions or Ctrl+K. Search by label or action ID; press f to favorite a read-only action. Input screens use Ctrl+S to submit multiline input; query results are not written to Devbox history. Install, Upgrade, Cleaner and source update still use their guarded execution paths.
+Open `devbox` and choose a category or press Ctrl+K from the home screen/catalog. Each action explains when to use it, example input, expected output and limitations. Press ? for module/action help; F1 opens help while typing. Enter submits single-line forms, Tab moves between host/port fields or input/output, and Ctrl+S runs a multiline transform. Tables support / filter, s sort, i details, r refresh, a related actions, and v native output where available. Use `devbox net tcp --help` for CLI action help. Query inputs and outputs are not written to Devbox history. Install, Upgrade, Cleaner and source update still use their guarded execution paths.
 
 ```bash
 devbox actions

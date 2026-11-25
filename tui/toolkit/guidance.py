@@ -563,6 +563,19 @@ GUIDES.update({
     **{"docker." + verb: Guide("Operations", "line", "api", verb.title() + " a selected container.", "Verified local operation plan and result.", "Changes container state; exact ID, endpoint and consent required.", ("docker.ps",))
        for verb in ("start", "stop", "restart")},
 })
+GUIDES.update({
+    "legacy:install": Guide("Manage", "none", "", "Install or configure development tools.", "A component plan with dependencies and consent.", "May install packages or change configuration; review before applying.", ()),
+    "legacy:upgrade": Guide("Manage", "none", "", "Update detected development tools.", "A manager-specific upgrade plan.", "External or unsupported tools may be skipped.", ()),
+    "legacy:agent-install": Guide("Manage", "none", "", "Install agent extensions.", "A plan with explicit agent targets.", "Review integration targets and consent.", ()),
+    "legacy:rtk-install": Guide("Manage", "none", "", "Configure RTK for selected agent CLIs.", "An explicit target plan.", "Registration does not verify hook trust.", ()),
+    "legacy:ponytail-install": Guide("Manage", "none", "", "Configure Ponytail for selected agent CLIs.", "An explicit target plan.", "Registration does not verify runtime loading.", ()),
+    "legacy:clean": Guide("Maintenance", "none", "", "Reclaim eligible developer cache space.", "A scoped cleanup plan.", "Manual resources require exact selection; cleanup may be irreversible.", ()),
+    "legacy:doctor": Guide("Diagnostics", "none", "", "Inspect detailed host prerequisites.", "Native diagnostic report.", "Read-only; no automatic repair.", ()),
+    "legacy:preflight": Guide("Diagnostics", "none", "", "Inspect host setup and compatibility.", "Host prerequisite report.", "Read-only snapshot.", ()),
+    "legacy:update": Guide("Updates", "none", "", "Update Devbox itself.", "Verified source update plan.", "Exits on successful update; does not overwrite local changes.", ()),
+    "legacy:theme": Guide("Preferences", "none", "", "Switch color or monochrome theme.", "Updated UI theme.", "No system changes.", ()),
+    "legacy:logs": Guide("Activity", "none", "", "Review saved managed-operation logs.", "Run report and native log.", "Query inputs and outputs are not stored.", ()),
+})
 MODULES = {
     "Networking": ("Inspect and troubleshoot network connections.", (
         ("Server cannot start", "net.ports"), ("Database unreachable", "net.dns"),

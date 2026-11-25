@@ -13,12 +13,14 @@ class ResultTable(KeyboardList):
         super().__init__(*args, **kwargs)
 
     def set_data(self, data, preserve=False):
-        key, query = self.current_value, self.query
+        previous, query, sort = self.row, self.query, self.sort_column
         self.data = data
         self.entries = [Entry(str(i), " ".join(c.value for c in row)) for i, row in enumerate(data.rows)]
         self.query = query if preserve else ""
-        self.index = next((i for i, e in enumerate(self.visible) if preserve and e.key == key), 0)
         self.sort_column = -1
+        if preserve and 0 <= sort < len(data.columns):
+            self.sort_by(sort)
+        self.index = next((i for i, e in enumerate(self.visible) if preserve and data.rows[int(e.key)] == previous), 0)
         self.on_change()
 
     @property
@@ -28,10 +30,17 @@ class ResultTable(KeyboardList):
     def sort_next(self):
         if not self.data.columns:
             return
-        self.sort_column = (self.sort_column + 1) % len(self.data.columns)
+        self.sort_by((self.sort_column + 1) % len(self.data.columns))
+
+    def sort_by(self, column):
+        self.sort_column = column
         def key(entry):
             row = self.data.rows[int(entry.key)]
-            return row[self.sort_column].value.casefold() if self.sort_column < len(row) else ""
+            value = row[self.sort_column].value.casefold() if self.sort_column < len(row) else ""
+            try:
+                return (0, float(value))
+            except ValueError:
+                return (1, value)
         self.entries.sort(key=key)
         self.index = 0
         self.on_change()
