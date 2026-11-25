@@ -55,6 +55,8 @@ STATUS_STYLES = {
     "Installed": "class:installed",
     "Update available": "class:warning",
     "Update unknown": "class:muted",
+    "Manual update": "class:warning",
+    "Check failed": "class:error",
     "Unknown": "class:muted",
     "Available": "class:installed",
     "Not checked": "class:warning",
@@ -152,6 +154,7 @@ class KeyboardList:
         on_related: Callable[[], None] | None = None,
         on_edit: Callable[[], None] | None = None,
         on_update: Callable[[], None] | None = None,
+        on_adopt: Callable[[], None] | None = None,
     ) -> None:
         self.entries = list(entries)
         self.multiple = multiple
@@ -238,6 +241,12 @@ class KeyboardList:
             @kb.add("e")
             def _edit(_event):
                 on_edit()
+
+        if on_adopt:
+            @kb.add("m")
+            @kb.add("M")
+            def _adopt(_event):
+                on_adopt()
 
         if on_update:
             @kb.add("u")

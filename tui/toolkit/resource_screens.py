@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 import shlex
+import sys
 import time
 
 from prompt_toolkit.application import in_terminal
@@ -33,6 +34,7 @@ class ResourceScreens:
             on_filter=self._begin_filter, on_all=self.resource_defaults,
             on_update=self.resource_updates, on_refresh=lambda: self.resource_refresh(force=True),
             on_details=self.resource_show_details, on_edit=self.resource_advanced,
+            on_adopt=self.resource_adopt,
             get_columns=self._component_list_width)
         self.resource_detail = TextArea(read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
         self.resource_plan_text = TextArea(read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
@@ -52,7 +54,7 @@ class ResourceScreens:
         self.views["resources"] = self._page(self.resource_title, HSplit([
             self._text(self.resource_summary, height=3), self._divider(),
             DynamicContainer(self.resource_layout), DynamicContainer(self._filter_layout),
-        ]), "↑↓ Move  Space Select  a Missing  u Updates  n Clear  r Refresh  / Filter  i Details  e Advanced  Enter Review  Esc")
+        ]), "↑↓ Move  Space Select  a Missing  u Updates  n Clear  r Refresh  / Filter  i Details  m Adopt  e Advanced  Enter Review  Esc")
         self.views["resource_detail"] = self._page("Resource details", self.resource_detail, "↑↓ Scroll  Esc Back")
         self.views["resource_confirm"] = self._page("Review changes", HSplit([
             self.resource_plan_text, self._divider(), self.resource_confirm.window,
@@ -125,7 +127,7 @@ class ResourceScreens:
             return
         self.resource_cache[scope] = (time.monotonic(), rows)
         self.resource_home_counts()
-        if self.resource_scope == scope and self.screen in ("resources", "resource_detail", "resource_confirm", "help"):
+        if self.resource_scope == scope and self.screen in ("resources", "resource_detail", "resource_confirm", "resource_result", "help"):
             self.resource_rows = rows
             self.resource_render_rows()
             self._notice("Inventory refreshed. Unknown versions are never auto-updated.")
@@ -144,7 +146,7 @@ class ResourceScreens:
                 ("class:installed", f"  {sum(r.installation == 'Installed' for r in rows)} installed"),
                 ("class:warning", f"  {sum(r.action == 'Update' for r in rows)} updates"),
                 ("class:missing", f"  {sum(r.installation == 'Missing' for r in rows)} missing\n"),
-                ("class:muted", f"  {len(self.resource_list.current_values)} selected · a recommended missing / u safe updates")]
+                ("class:muted", f"  {len(self.resource_list.current_values)} selected · {sum(r.status == 'Manual update' for r in rows)} manual · {sum(r.status == 'Check failed' for r in rows)} failed · a missing / u updates")]
 
     def resource_layout(self):
         if self.columns() >= WIDE_LAYOUT_MIN:
@@ -167,9 +169,10 @@ class ResourceScreens:
                ("class:body", "  Installed: " + (row.installed_version or "Unknown") + "\n"
                 + "  Available: " + (row.available_version or "Unknown") + "\n"
                 + "  Manager: " + (row.manager or "Unverified") + "\n"
+                + "  Ownership: " + row.ownership + "\n"
                 + "  Path: " + (row.path or "—") + "\n"
                 + "  Recommended: " + ("Yes" if row.recommended else "Optional") + "\n"
-                + "  Action: " + (row.action or "No automatic action") + "\n\n"),
+                + "  Action: " + (row.action or ("M — Adopt verified binary" if row.can_adopt else "No automatic action")) + "\n\n"),
                ("class:muted", "  " + row.evidence + "\n")]
         if row.integrations:
             out.append(("class:section", "\n  AGENT INTEGRATIONS\n"))
@@ -193,6 +196,20 @@ class ResourceScreens:
     def resource_advanced(self):
         self.resource_advanced_parent = True
         self.open_toolkit("Coding Agents" if self.resource_scope == "ai" else "Environment")
+
+    def resource_adopt(self):
+        if self.busy or (self.resource_task and not self.resource_task.done()):
+            self._notice("Wait for inventory to finish.", style="class:warning")
+            return
+        row = next((r for r in self.resource_rows if r.key == self.resource_list.current_value), None)
+        if not row or not row.can_adopt:
+            self._notice("This resource cannot be adopted automatically.", style="class:warning")
+            return
+        cmd = ("bash", str(ROOT / "utils/adopt-binary.sh"), sys.executable, row.key, row.installed_version)
+        self.resource_operations = (resources.Operation("Adopt", row.key, row.name, cmd),)
+        self.resource_plan_text.text = "ADOPT " + row.name + "\n" + row.path + "\nVersion: " + row.installed_version + "\n\nVerify official release SHA-256 and register ownership. No binary replacement.\n" + shlex.join(cmd)
+        self.resource_confirm.index = 0
+        self.navigate("resource_confirm", self.resource_confirm.window)
 
     def resource_review(self):
         if self.busy or (self.resource_task and not self.resource_task.done()):

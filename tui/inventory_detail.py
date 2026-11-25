@@ -11,7 +11,8 @@ from tui.catalog import BINS
 APT = {"zsh": ("zsh",), "keychain": ("keychain",), "zoxide": ("zoxide",),
        "fzf": ("fzf",), "ripgrep": ("ripgrep",), "bat-fd": ("bat", "fd-find"),
        "direnv": ("direnv",), "docker": ("docker-ce", "docker.io"),
-       "nvidia": ("nvidia-container-toolkit",), "kubectl": ("kubectl",),
+       "nvidia": ("nvidia-container-toolkit", "nvidia-container-toolkit-base",
+                  "libnvidia-container1", "libnvidia-container-tools"), "kubectl": ("kubectl",),
        "minikube": ("minikube",), "uv": ("uv",),
        "tmux": ("tmux",), "btop": ("btop",), "gh": ("gh",), "jq": ("jq",)}
 RECEIPTS = {"kubectl": Path("/usr/local/bin/kubectl"),

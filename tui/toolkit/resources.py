@@ -18,6 +18,7 @@ from tui.backend import ROOT, build_command
 from .agent_setup import ITEMS, EXTENSIONS, selection
 from .agents import agent_matrix
 from . import ai_resource_updates as ai_updates
+from . import binary_adoption
 
 NPM = {"codex": "@openai/codex", "claude": "@anthropic-ai/claude-code",
        "copilot": "@github/copilot", "opencode": "opencode-ai",
@@ -43,15 +44,19 @@ class Resource:
     evidence: str = ""
     integrations: tuple[str, ...] = ()
     can_update: bool = False
+    ownership: str = "Unverified"
+    can_adopt: bool = False
 
     @property
     def status(self):
         if self.installation != "Installed":
             return self.installation
         if self.update == "Available":
-            return "Update available"
+            return "Update available" if self.can_update else "Manual update"
         if self.update == "Current":
             return "Installed"
+        if self.update == "Failed":
+            return "Check failed"
         return "Checking" if self.update == "Checking" else "Update unknown"
 
     @property
@@ -151,42 +156,92 @@ def npm_owned(key, path):
 
 def npm_probe(row):
     installed = npm_owned(row.key, row.path)
-    if not installed:
-        return replace(row, update="Unknown", evidence="External or unverified npm ownership; use original manager.")
+    owned = bool(installed)
+    # Read the active CLI version even when Devbox cannot establish ownership.
+    installed = installed or (version(command(row.path, "--version")) if row.path else "")
     candidate = version(command("npm", "view", NPM[row.key], "version", "--fetch-retries=0", "--fetch-timeout=5000", timeout=7))
-    return replace(row, manager="npm (user-local)", installed_version=installed,
-                   available_version=candidate, update=newer(installed, candidate), can_update=True)
+    return replace(row, manager="npm (user-local)" if owned else "External CLI / manager unverified",
+                   ownership="Verified" if owned else "Unverified", installed_version=installed,
+                   available_version=candidate, update=newer(installed, candidate) if candidate else "Failed",
+                   can_update=owned, evidence="Official npm package version; external CLI must be updated by its original manager." if not owned else ("npm registry query failed." if not candidate else "Verified user-local npm package."))
+
+
+def package_owner(path, packages):
+    """Resolve user-local aliases and merged-/usr paths before querying dpkg."""
+    if not path:
+        return False
+    try:
+        resolved = str(Path(path).resolve())
+    except (OSError, RuntimeError):
+        return False
+    paths = list(dict.fromkeys((path, resolved)))
+    if resolved.startswith("/usr/"):
+        paths.append(resolved[4:])
+    elif resolved.startswith(("/bin/", "/sbin/", "/lib/")):
+        paths.append("/usr" + resolved)
+    for candidate in dict.fromkeys(paths):
+        owner = command("dpkg-query", "-S", candidate)
+        if any(re.search(r"(^|\n)" + re.escape(pkg) + r"(?::[^:\n]+)?: ", owner)
+               for pkg in packages):
+            return True
+    return False
 
 
 def apt_probe(row):
-    # Check the same packages that the existing upgrade backend manages.
     packages = APT.get(row.key, ())
+    if not packages:
+        return None
     if row.key == "docker":
         packages = ("docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin")
-    installed, candidates, states = [], [], []
-    owner = command("dpkg-query", "-S", row.path) if row.path else ""
-    # An active binary shadowed by another manager must not be auto-updated.
-    if not owner or not any(re.search(r"(^|\n)" + re.escape(p) + r"(?::[^:\n]+)?: ", owner) for p in packages):
+    if row.key == "bat-fd":
+        targets = [(row.path, ("bat",)),
+                   (shutil.which("fd") or shutil.which("fdfind"), ("fd-find",))]
+    else:
+        targets = [(row.path, packages)]
+    if not all(package_owner(path, owners) for path, owners in targets):
         return None
+    installed, candidates, states = [], [], []
     for package in packages:
-        current = command("dpkg-query", "-W", "-f=${Version}", package)
-        if not current:
+        raw = command("dpkg-query", "-W", "-f=${Status}\\t${Version}", package)
+        status, sep, current = raw.partition("\t")
+        if not sep or status != "install ok installed" or not current:
             continue
         policy = command("apt-cache", "policy", package)
         match = re.search(r"^\s*Candidate:\s*(\S+)", policy, re.M)
         candidate = match.group(1) if match else ""
         installed.append(package + " " + current)
         candidates.append(package + " " + (candidate or "?"))
-        states.append(apt_newer(current, candidate) if candidate and candidate != "(none)" else "Unknown")
+        states.append(apt_newer(current, candidate) if candidate and candidate != "(none)" else "Failed")
     if not states:
         return None
-    state = "Available" if "Available" in states else "Unknown" if "Unknown" in states else "Current"
-    # Zsh includes git-managed plugins; the APT candidate is only one part.
-    if row.key == "zsh" and state == "Current":
-        state = "Unknown"
+    state = aggregate(states)
     return replace(row, installed_version=", ".join(installed), available_version=", ".join(candidates),
-                   update=state, manager="APT", can_update=True,
-                   evidence="Candidate from local APT indexes; execution refreshes indexes.")
+                   update=state, manager="APT", can_update=True, ownership="Verified",
+                   evidence="Candidate from local APT indexes; execution refreshes indexes."
+                   + (" One or more package candidates could not be checked." if "Failed" in states else ""))
+
+
+def aggregate(states):
+    if "Available" in states:
+        return "Available"
+    if "Failed" in states:
+        return "Failed"
+    if "Unknown" in states or not states:
+        return "Unknown"
+    return "Current"
+
+
+def binary_version(key, path):
+    if not path:
+        return ""
+    args = ("version", "--client", "-o", "json") if key == "kubectl" else ("version", "--short") if key == "minikube" else ("--version",)
+    raw = command(path, *args)
+    if key == "kubectl":
+        try:
+            raw = json.loads(raw)["clientVersion"]["gitVersion"]
+        except (ValueError, KeyError, TypeError):
+            return ""
+    return version(raw)
 
 
 def release_probe(row):
@@ -198,7 +253,7 @@ def release_probe(row):
         receipt = Path.home() / ".local/state/devbox-bootstrap/managed" / (key + ".sha256")
         expected = Path.home() / ".local/bin/rtk" if key == "rtk" else Path("/usr/local/bin") / key
         try:
-            owned = path == expected and not path.is_symlink() and not receipt.is_symlink()
+            owned = path == expected and path.is_file() and not path.is_symlink() and not receipt.is_symlink() and receipt.stat().st_size <= 256
             if owned:
                 with path.open("rb") as stream:
                     digest = hashlib.sha256()
@@ -207,16 +262,8 @@ def release_probe(row):
                 owned = digest.hexdigest() == receipt.read_text().strip()
         except OSError:
             owned = False
-    if not owned:
-        return replace(row, update="Unknown", evidence="External/legacy binary; ownership not verified.")
-    args = ("version", "--client", "-o", "json") if key == "kubectl" else ("version", "--short") if key == "minikube" else ("--version",)
-    raw = command(row.path, *args)
-    if key == "kubectl":
-        try:
-            raw = json.loads(raw)["clientVersion"]["gitVersion"]
-        except (ValueError, KeyError, TypeError):
-            raw = ""
-    installed = version(raw)
+    # Version discovery is read-only and independent of permission to mutate.
+    installed = binary_version(key, row.path)
     if key == "kubectl":
         candidate = version(os.environ.get("BOOTSTRAP_KUBECTL_VERSION") or command("curl", "-fsSL", "--max-time", "6", "https://dl.k8s.io/release/stable.txt", timeout=8))
     else:
@@ -225,26 +272,83 @@ def release_probe(row):
             candidate = version(json.loads(raw)["tag_name"])
         except (ValueError, KeyError, TypeError):
             candidate = ""
+    evidence = "Verified standalone installation." if owned else "External/legacy binary; automatic replacement blocked."
+    adopt = not owned and bool(installed) and binary_adoption.eligible(key, row.path)
+    if adopt:
+        evidence += " M verifies official release checksum and adopts without replacing the binary."
+    if not candidate:
+        evidence += " Upstream version query failed or returned invalid metadata."
+    if not installed:
+        evidence += " Installed version could not be parsed."
     return replace(row, manager="Standalone", installed_version=installed, available_version=candidate,
-                   update=newer(installed, candidate), can_update=True)
+                   update=newer(installed, candidate) if candidate else "Failed", can_update=owned,
+                   ownership="Verified" if owned else "Unmanaged", can_adopt=adopt, evidence=evidence)
+
+
+def git_checkout(path, repo):
+    """Check official origin and remote branch without modifying the checkout."""
+    label = repo.rsplit("/", 1)[-1]
+    if not (path / ".git").exists():
+        return ("Unknown", "", "", label + ": repository missing", False)
+    origin = command("git", "-C", str(path), "remote", "get-url", "origin")
+    allowed = {"https://github.com/" + repo, "https://github.com/" + repo + ".git",
+               "git@github.com:" + repo + ".git"}
+    if origin not in allowed:
+        return ("Unknown", "", "", label + ": custom origin", False)
+    current = command("git", "-C", str(path), "rev-parse", "HEAD")
+    upstream = command("git", "-C", str(path), "rev-parse", "--abbrev-ref", "@{upstream}")
+    if not upstream.startswith("origin/") or not re.fullmatch(r"[0-9a-f]{40}", current):
+        return ("Unknown", current[:12], "", label + ": no verified upstream", False)
+    result = command("git", "-C", str(path), "ls-remote", "origin", "refs/heads/" + upstream[7:], timeout=8).split()
+    latest = result[0] if result else ""
+    if not re.fullmatch(r"[0-9a-f]{40}", latest):
+        return ("Failed", current[:12], "", label + ": remote query failed", False)
+    # porcelain output can be empty on success or failure; check exit separately.
+    try:
+        check = subprocess.run(["git", "-C", str(path), "status", "--porcelain", "--untracked-files=no"],
+                               capture_output=True, text=True, timeout=5, check=False)
+        clean = check.returncode == 0 and not check.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        clean = False
+    if current == latest:
+        return ("Current", current[:12], latest[:12], label + (": current" if clean else ": local changes"), clean)
+    raw = command("curl", "-fsSL", "--max-time", "6",
+                  "https://api.github.com/repos/" + repo + "/compare/" + current + "..." + latest, timeout=8)
+    try:
+        comparison = json.loads(raw).get("status")
+    except (ValueError, AttributeError):
+        comparison = None
+    if comparison == "ahead":
+        return ("Available", current[:12], latest[:12], label + (": fast-forward available" if clean else ": local changes; manual update"), clean)
+    if comparison == "behind":
+        return ("Current", current[:12], latest[:12], label + ": local revision ahead; preserved", False)
+    return ("Unknown" if comparison == "diverged" else "Failed", current[:12], latest[:12],
+            label + ": " + ("diverged history" if comparison == "diverged" else "ancestry not verified"), False)
 
 
 def git_probe(row):
-    path = Path.home() / "powerlevel10k"
-    origin = command("git", "-C", str(path), "remote", "get-url", "origin")
-    allowed = {"https://github.com/romkatv/powerlevel10k", "https://github.com/romkatv/powerlevel10k.git", "git@github.com:romkatv/powerlevel10k.git"}
-    if origin not in allowed:
-        return replace(row, update="Unknown", evidence="Git origin not verified.")
-    current = command("git", "-C", str(path), "rev-parse", "HEAD")
-    upstream = command("git", "-C", str(path), "rev-parse", "--abbrev-ref", "@{upstream}")
-    if not upstream.startswith("origin/"):
-        return replace(row, update="Unknown", evidence="No verified upstream branch.")
-    candidate = command("git", "-C", str(path), "ls-remote", "origin", "refs/heads/" + upstream[7:], timeout=8).split()
-    latest = candidate[0] if candidate else ""
-    # A differing remote revision is not proof of a fast-forward; backend rechecks.
-    state = "Current" if current and current == latest else "Unknown"
-    return replace(row, manager="Git", installed_version=current[:12], available_version=latest[:12],
-                   update=state, evidence="Different revisions require manual fast-forward review." if state == "Unknown" else "")
+    state, current, candidate, evidence, safe = git_checkout(Path.home() / "powerlevel10k", "romkatv/powerlevel10k")
+    return replace(row, manager="Git", installed_version=current, available_version=candidate,
+                   update=state, evidence=evidence, can_update=safe,
+                   ownership="Verified" if safe else "Unverified")
+
+
+def zsh_probe(row):
+    apt = apt_probe(row)
+    home = Path.home()
+    custom = Path(os.environ.get("ZSH_CUSTOM") or home / ".oh-my-zsh/custom")
+    parts = [
+        git_checkout(home / ".oh-my-zsh", "ohmyzsh/ohmyzsh"),
+        git_checkout(custom / "plugins/zsh-autosuggestions", "zsh-users/zsh-autosuggestions"),
+    ]
+    states = ([apt.update] if apt else ["Unknown"]) + [part[0] for part in parts]
+    # Existing backend skips dirty/custom Git repositories and only updates APT.
+    # Require verified APT ownership and safe git state for automatic batch updates.
+    safe = bool(apt and apt.can_update and all(part[3].endswith((": current", ": fast-forward available")) and part[4] for part in parts))
+    return replace(row, manager="APT + Git", installed_version="; ".join(([apt.installed_version] if apt else ["zsh: unknown"]) + [part[1] or "?" for part in parts]),
+                   available_version="; ".join(([apt.available_version] if apt else ["zsh: unknown"]) + [part[2] or "?" for part in parts]),
+                   update=aggregate(states), can_update=safe, ownership="Verified" if safe else "Unverified",
+                   evidence="; ".join(([apt.evidence] if apt else ["Zsh APT ownership unverified"]) + [part[3] for part in parts]))
 
 
 def probe(row):
@@ -258,15 +362,19 @@ def probe(row):
         info = ai_updates.ponytail_update()
         return replace(row, update=info.state, manager="Codex plugin manager",
                        installed_version=info.installed, available_version=info.candidate,
-                       evidence=info.reason, can_update=info.eligible)
+                       evidence=info.reason, can_update=info.eligible,
+                       ownership="Verified" if info.eligible else "Unverified")
     if row.key == "powerlevel10k":
         return git_probe(row)
+    if row.key == "zsh":
+        return zsh_probe(row)
     apt = apt_probe(row)
     if apt:
         return apt
     if row.key in RELEASES or row.key == "kubectl":
         return release_probe(row)
-    return replace(row, update="Unknown", evidence="Original package manager not verified.")
+    return replace(row, update="Unknown", installed_version=version(command(row.path, "--version")) if row.path else "",
+                   evidence="Original package manager not verified; automatic replacement blocked.")
 
 
 def scan(scope, rows):
@@ -297,7 +405,8 @@ def scan(scope, rows):
                 info = ai_updates.skill_update(row.key[6:], entries, tree)
                 row = replace(row, update=info.state, manager="Skills CLI (global)",
                               installed_version=info.installed, available_version=info.candidate,
-                              evidence=info.reason, can_update=info.eligible)
+                              evidence=info.reason, can_update=info.eligible,
+                              ownership="Verified" if info.eligible else "Unverified")
             enriched.append(row)
         rows = tuple(enriched)
     with ThreadPoolExecutor(max_workers=4) as pool:
