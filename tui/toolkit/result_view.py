@@ -1,9 +1,26 @@
 """Reusable result table and semantic report rendering."""
 from prompt_toolkit.data_structures import Point
+from prompt_toolkit.utils import get_cwidth
 from tui.ui import Entry, KeyboardList
-from .inventory_view import clip
 from .native import safe_text
 from .results import TableData, ReportData, ResourceData, TextData
+
+def fit_cell(value, width):
+    text = safe_text(value).replace("\n", " ").replace("\t", " ")
+    if width <= 0:
+        return ""
+    if get_cwidth(text) > width:
+        kept = []
+        used = 0
+        for char in text:
+            size = get_cwidth(char)
+            if used + size > width - 1:
+                break
+            kept.append(char)
+            used += size
+        text = "".join(kept) + "…"
+    return text + " " * max(0, width - get_cwidth(text))
+
 
 class ResultTable(KeyboardList):
     def __init__(self, *args, **kwargs):
@@ -52,6 +69,8 @@ class ResultTable(KeyboardList):
         if not self.visible:
             return [("class:muted", "  No matching rows. Refresh or change the filter.")]
         width = max(1, self.get_columns() - 2)
+        if width < 8:
+            return [("class:muted", fit_cell("Resize", width))]
         n = len(self.data.columns)
         if not n:
             return []
@@ -61,7 +80,7 @@ class ResultTable(KeyboardList):
         weights = [max(7, min(22, len(c) + 3)) for c in self.data.columns[:count]]
         widths = [max(1, available * w // sum(weights)) for w in weights]
         widths[-1] += available - sum(widths)
-        out = [("class:section", "  " + " ".join(clip(c, w).ljust(w) for c, w in zip(self.data.columns, widths)) + "\n")]
+        out = [("class:section", "  " + " ".join(fit_cell(c, w) for c, w in zip(self.data.columns, widths)) + "\n")]
         for i, e in enumerate(self.visible):
             active = i == self.index
             out.append(("class:focus" if active else "class:body", "> " if active else "  "))
@@ -70,7 +89,7 @@ class ResultTable(KeyboardList):
                 style = "class:" + c.tone
                 if active:
                     style = "class:focus" if c.tone in ("body", "muted") else "class:focus " + style
-                out.append((style, clip(c.value, w).ljust(w) + " "))
+                out.append((style, fit_cell(c.value, w) + " "))
             out.append(("", "\n"))
         return out
 

@@ -149,6 +149,10 @@ class TUIBasicTests(unittest.TestCase):
                         self.assertEqual(app.screen, "select")
                         input_pipe.send_text("\x1b")
                         await asyncio.sleep(0.15)
+                        self.assertEqual(app.screen, "toolkit")
+                        self.assertEqual(app.toolkit_category, "Environment")
+                        input_pipe.send_text("\x1b")
+                        await asyncio.sleep(0.15)
                         self.assertEqual(app.screen, "home")
                         input_pipe.send_text("q")
                         await asyncio.wait_for(run, 2)
@@ -160,7 +164,7 @@ class TUIBasicTests(unittest.TestCase):
         asyncio.run(scenario())
 
     def test_keyboard_doctor_result_log_and_return(self):
-        """Doctor -> result -> log -> result -> home using only keystrokes."""
+        """Doctor -> result -> log -> result -> parent module -> home using only keystrokes."""
         from prompt_toolkit.application.current import create_app_session
         from prompt_toolkit.input import create_pipe_input
         from prompt_toolkit.output import DummyOutput
@@ -189,6 +193,10 @@ class TUIBasicTests(unittest.TestCase):
                                 self.assertEqual(app.screen, "result")
                                 pipe.send_text("\r")
                                 await asyncio.sleep(0.10)
+                                self.assertEqual(app.screen, "toolkit")
+                                self.assertEqual(app.toolkit_category, "Health")
+                                pipe.send_text("\x1b")
+                                await asyncio.sleep(0.20)
                                 self.assertEqual(app.screen, "home")
                                 pipe.send_text("q")
                                 await asyncio.wait_for(run, 2)

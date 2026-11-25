@@ -84,7 +84,7 @@ class ToolkitUX:
             on_help=self._show_help, on_change=self._invalidate, on_filter=self._begin_filter,
             on_refresh=self.ux_repeat, on_details=self.ux_show_row, on_sort=self.ux_sort,
             on_raw=self.ux_show_raw, on_related=self.ux_open_related, on_edit=self.ux_edit,
-            get_columns=self.columns)
+            get_columns=lambda: self.columns())
         self.ux_related = KeyboardList([], on_enter=self.ux_run_related, on_back=self.back,
             on_help=self._show_help, on_change=self._invalidate, get_columns=self.columns)
         self.ux_related_parent = "toolkit_result"

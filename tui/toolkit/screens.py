@@ -217,8 +217,14 @@ class ToolkitScreens(ToolkitUX):
         self.open_menu("install" if is_agent else key)
         self.selector.current_values = [key if is_agent else row.key]
         self.confirm_selection()
-        if is_agent and "agent_" + row.key in {e.key for e in self.options.entries}:
-            self.options.current_values = ["agent_" + row.key]
+        if is_agent:
+            target = "agent_" + row.key
+            if target not in {e.key for e in self.options.entries}:
+                self.ux_legacy_parent = None
+                self.navigate(self.ux_related_parent, self.inventory_list.window)
+                self._notice("Agent no longer available. Refresh inventory.", style="class:warning")
+                return
+            self.options.current_values = [target]
             self._refresh_confirm_plan()
 
     def inventory_refresh(self):
