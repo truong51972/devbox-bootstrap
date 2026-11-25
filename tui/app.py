@@ -57,6 +57,7 @@ MENU = (
     ("utilities", "Data & Text Utilities"),
     ("health", "System Health"),
     ("logs", "Activity"),
+    ("update", "Update Devbox source"),
     ("settings", "Settings & Update"),
 )
 MENU_GROUPS = {
@@ -65,7 +66,7 @@ MENU_GROUPS = {
     "network": "INSPECT & OPERATE", "system": "INSPECT & OPERATE",
     "containers": "INSPECT & OPERATE", "storage": "INSPECT & OPERATE",
     "project": "INSPECT & OPERATE", "utilities": "INSPECT & OPERATE",
-    "health": "DEVBOX", "logs": "DEVBOX", "settings": "DEVBOX", "exit": "DEVBOX",
+    "health": "DEVBOX", "logs": "DEVBOX", "update": "DEVBOX", "settings": "DEVBOX", "exit": "DEVBOX",
 }
 MENU_DETAILS = {
     "install": "Choose development tools and install only what you need.",
@@ -198,6 +199,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self.update_check_task: asyncio.Task[None] | None = None
         self.pending_update: UpdateCheck | None = None
         self.update_revision = ""
+        self.resource_run_origin = None
+        self.run_labels = {}
         self.exit_message = ""
         self.process: asyncio.subprocess.Process | None = None
         self.log_path: Path | None = None
@@ -307,6 +310,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
     def _start_update_check(self) -> None:
         if os.environ.get("DEVBOX_CHECK_UPDATES", "1") == "0":
             return
+        self._set_source_update_status("Checking")
         self._notice("Checking for Devbox updates...", style="class:running")
         self.update_check_task = self.tasks.start("update", self._check_startup_update())
 
@@ -315,8 +319,15 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             self.tasks.cancel("update")
         self.pending_update = None
 
+    def _set_source_update_status(self, status):
+        self.menu.entries = [replace(entry, status=status) if entry.key == "update" else entry for entry in self.menu.entries]
+        self._invalidate()
+
     async def _check_startup_update(self) -> None:
         result = await check_update(ROOT)
+        self._set_source_update_status({"available": "Update available", "current": "Installed",
+                                        "dirty": "Blocked", "unsupported": "Blocked",
+                                        "not-fast-forward": "Blocked"}.get(result.state, "Check failed"))
         if result.state == "available":
             self.pending_update = result
             if self.screen == "home" and not self.busy:
@@ -1024,7 +1035,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         if result:
             @kb.add("enter")
             def _home(_event):
-                self.navigate("home", self.menu.window)
+                self._leave_result()
 
             @kb.add("l")
             def _log(_event):
@@ -1076,10 +1087,11 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
 
         @kb.add("tab", filter=Condition(lambda: self.screen == "resource_confirm"), eager=True)
         def _switch_resource_confirm_focus(_event):
-            if self.app.layout.has_focus(self.resource_confirm.window):
-                self.app.layout.focus(self.resource_plan_text)
-            else:
-                self.app.layout.focus(self.resource_confirm.window)
+            targets = [self.resource_confirm.window, self.resource_plan_text]
+            if self.resource_options.entries:
+                targets.append(self.resource_options.window)
+            index = next((i for i, target in enumerate(targets) if self.app.layout.has_focus(target)), 0)
+            self.app.layout.focus(targets[(index + 1) % len(targets)])
 
         @kb.add("?", filter=Condition(lambda: self.screen not in ("help", "toolkit_input") and not self.filter_active))
         def _help(_event):
@@ -1302,6 +1314,14 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             self._notice(str(exc), style="class:error")
             return
 
+        self.resource_run_origin = None
+        self.run_labels = {}
+        self._start_command(action, command, chosen)
+
+    def _start_command(self, action, command, chosen, *, resource_scope=None, labels=None, consent=None, needs_sudo=None):
+        """Reserve and execute all component mutations via the same run pipeline."""
+        self.resource_run_origin = resource_scope
+        self.run_labels = labels or {}
         # Stop read-only workers before executing any mutating job.
         self._cancel_cleaner_scan()
         self._invalidate_agent_scan()
@@ -1313,18 +1333,23 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self.run_report = None
         self.outcome_details = {}
         self.status = {code: ("QUEUED" if code in chosen else "--")
-                       for code in (CLEANER_ITEMS if action == "clean" else ORDER)}
+                       for code in (chosen if resource_scope else CLEANER_ITEMS if action == "clean" else ORDER)}
         self.log_path = None
         self.event_path = None
         self.event_offset = 0
         self.last_code = None
         self.last_result = "Preparing..."
         self.expanded_log = False
+        self.status_view.window.height = Dimension(weight=3, min=6)
+        self.log_view.window.height = Dimension(weight=2, min=5)
         self.status_view.text = self._render_status()
         self.log_view.text = "Preparing job..."
         self._notice(f"Starting {action}...", style="class:running")
         self.navigate("run", self.status_view)
-        self.run_task = asyncio.create_task(self._run(action, command, chosen))
+        if resource_scope:
+            self.run_task = asyncio.create_task(self._run(action, command, chosen, consent=consent, sudo_required=needs_sudo))
+        else:
+            self.run_task = asyncio.create_task(self._run(action, command, chosen))
 
     async def _authorize_sudo(self) -> bool:
         if not shutil.which("sudo"):
@@ -1351,7 +1376,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
                 self._notice("sudo session expired; privileged steps may fail.")
                 return
 
-    async def _run(self, action: str, command: list[str], selected: list[str]) -> None:
+    async def _run(self, action: str, command: list[str], selected: list[str], *, consent=None, sudo_required=None) -> None:
         keepalive: asyncio.Task[None] | None = None
         code: int | None = None
         started = time.monotonic()
@@ -1362,7 +1387,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             needs_sudo = any(code not in {"rtk", "skills-cli", "ponytail"} for code in selected)
             if action == "clean":
                 needs_sudo = any(CLEANER_ITEMS[key].sudo for key in selected)
-            if action in ("install", "upgrade", "clean") and needs_sudo and not self.dry_run:
+            if sudo_required is not None:
+                needs_sudo = sudo_required
+            if action in ("install", "upgrade", "clean", "resources") and needs_sudo and not self.dry_run:
                 if not await self._authorize_sudo():
                     code = 1
                     self.last_result = "Cannot start: sudo authentication not completed."
@@ -1371,7 +1398,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
 
             files = prepare_run(STATE_ROOT, action)
             self.log_path, self.event_path = files.log, files.events
-            enabled = set(self.options.current_values) if action == "install" else set()
+            enabled = set(consent) if consent is not None else set(self.options.current_values) if action == "install" else set()
             with os.fdopen(files.fd, "wb", buffering=0) as output:
                 self.process = await launch(command, root=ROOT, env=run_env(files.events, enabled), output=output)
                 self._notice(f"{action.title()} running. Log: {self.log_path}", style="class:running")
@@ -1409,6 +1436,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             # Changes to agent plugins can occur during install; invalidate the
             # cached report for the next Components screen, without blocking Result.
             self._invalidate_agent_scan()
+            if action == "resources" and self.resource_run_origin:
+                self.resource_cache.pop(self.resource_run_origin, None)
+                self.resource_list.current_values = []
             self._render_result()
             self._notice(self.last_result, style=STATUS_STYLES[self.run_report.heading])
             if action == "update" and code == 0 and self.app.is_running:
@@ -1421,7 +1451,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
 
     def _render_status(self) -> str:
         labels = dict(COMPONENTS) | {key: item.label for key, item in CLEANER_ITEMS.items()}
-        return status_lines(self.current_action, self.status, labels, self.outcome_details)
+        return status_lines(self.current_action, self.status, labels | self.run_labels, self.outcome_details)
 
     def _refresh(self) -> None:
         events, details, self.event_offset = read_run_events(self.event_path, self.event_offset)
@@ -1502,6 +1532,16 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             proc = await asyncio.create_subprocess_exec(*argv)
             await proc.wait()
 
+    def _leave_result(self):
+        if self.resource_run_origin:
+            scope = self.resource_run_origin
+            self.resource_run_origin = None
+            self.resource_scope = scope
+            self.navigate("resources", self.resource_list.window)
+            self.resource_refresh(force=True)
+        else:
+            self.navigate("home", self.menu.window)
+
     def back(self) -> None:
         if self.busy:
             self._notice("A task is running; leaving would orphan the installer.")
@@ -1537,7 +1577,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             self.filter_input.text = ""
             self._active_list().set_query("")
             self._notice("Filter cleared. Press Esc again to return.")
-        elif self.screen in ("select", "result", "logs", "cleaner"):
+        elif self.screen == "result":
+            self._leave_result()
+        elif self.screen in ("select", "logs", "cleaner"):
             if self.screen == "cleaner":
                 self._cancel_cleaner_scan()
                 self._notice("Returned home. Open Cleaner to scan again.")

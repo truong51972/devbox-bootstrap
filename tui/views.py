@@ -43,7 +43,7 @@ class DevboxViews:
             "Cleaner": "Space Toggle  a Safe  / Filter  i Info  r Scan  Enter Next  Esc",
             "Confirm": "Space Options  d Dry-run  Enter Run  Esc Back",
             "Execution": "l Expand log  Exit locked",
-            "Result": "l Log  Enter Home  Esc Back",
+            "Result": "l Log  Enter Back  Esc Back",
             "History": "↑↓ Move  / Filter  Enter Open  Esc Back",
             "Log viewer": "↑↓ Scroll  o Pager  Esc Back",
             "Keyboard help": "Esc Back",
@@ -119,7 +119,7 @@ class DevboxViews:
         )
         self.views["result"] = self._page(
             "Result", self.results_view,
-            "l View log   Enter Home   Esc Home   ? Help",
+            "l View log   Enter Back   Esc Back   ? Help",
         )
         self.views["logs"] = self._page(
             "History", HSplit([
