@@ -4,7 +4,7 @@ A local-first, keyboard-first developer convenience toolkit for Linux and WSL. I
 
 ## Daily toolkit
 
-Open `devbox` and choose a category or press Ctrl+K from the home screen/catalog. Each action explains when to use it, example input, expected output and limitations. Press ? for module/action help; F1 opens help while typing. Enter submits single-line forms, Tab moves between host/port fields or input/output, and Ctrl+S runs a multiline transform. Tables support / filter, s sort, i details, r refresh, a related actions, and v native output where available. Use `devbox net tcp --help` for CLI action help. Query inputs and outputs are not written to Devbox history. Install, Upgrade, Cleaner and source update still use their guarded execution paths.
+Open `devbox` and choose a category or press Ctrl+K from the home screen/catalog. Each action explains when to use it, example input, expected output and limitations. Press i for scrollable full details, including the action catalog. Press ? for module/action help; F1 opens help while typing. Enter submits single-line forms, Tab moves between host/port fields or input/output, and Ctrl+S runs a multiline transform. Tables support / filter, s sort, i details, r refresh, x related actions, and v native output where available. Use `devbox net tcp --help` for CLI action help. Query inputs and outputs are not written to Devbox history. Install, Upgrade, Cleaner and source update still use their guarded execution paths.
 
 ```bash
 devbox actions
@@ -107,6 +107,8 @@ Mouse input is deliberately disabled. No new TUI dependencies are required.
 | O | Log viewer | Open external pager (if installed) |
 | ? | Most screens | Show keyboard help |
 | Q | Main menu | Quit |
+
+Development Tools and AI Agents show installation and update state separately. Use g to cycle status filters, u to select verified updates and c to select retryable update checks. Bulk presets preserve selections, including those hidden by filters; review the exact batch before applying it. Settings can persist startup update checks, inventory cache lifetime and the active theme. Environment overrides take precedence.
 
 The default theme uses ANSI terminal colors. For monochrome terminals, set
 `DEVBOX_THEME=mono devbox`; `t` toggles themes for the current session.

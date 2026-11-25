@@ -183,6 +183,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self.previous_screen = "home"
         self.help_return_screen = "home"
         self.preview_return_screen = "home"
+        self.palette_origin = None
         self.preferences = preferences.load()
         self.action = ""
         self.current_action = ""
@@ -1108,10 +1109,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
     def _bind_text(self, widget, *, result=False, log_viewer=False) -> None:
         kb = KeyBindings()
 
-        @kb.add("c-k", filter=Condition(lambda: not self.busy and self.screen in ("home", "toolkit", "resources") and not self.filter_active), eager=True)
+        @kb.add("c-k", filter=Condition(lambda: not self.busy and self.screen in ("home", "toolkit", "resources", "devbox_info", "logs") and not self.filter_active), eager=True)
         def _quick(_event):
-            self.open_toolkit()
-            self._begin_filter()
+            self.open_palette()
 
         @kb.add("escape")
         def _back(_event):
@@ -1168,6 +1168,39 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
 
         widget.control.key_bindings = kb
 
+    def open_palette(self):
+        if self.screen == "resources":
+            self.palette_origin = ("resources", self.resource_scope, self.resource_list.query, self.resource_list.index, self.resource_filter, list(self.resource_list.current_values))
+        elif self.screen == "toolkit" and self.toolkit_category is not None:
+            self.palette_origin = ("toolkit", self.toolkit_category, self.toolkit_list.query, self.toolkit_list.index)
+        elif self.screen in ("home", "devbox_info", "logs", "cleaner"):
+            self.palette_origin = (self.screen,)
+        self.open_toolkit()
+        self._begin_filter()
+
+    def restore_palette_origin(self):
+        origin = self.palette_origin
+        self.palette_origin = None
+        if not origin:
+            return False
+        screen = origin[0]
+        if screen == "resources":
+            _, scope, query, index, status_filter, selected = origin
+            if self.resource_scope != scope:
+                self.resource_open(scope)
+            self.resource_filter = status_filter
+            self.resource_apply_filter()
+            self.resource_list.set_query(query)
+            self.resource_list.current_values = selected
+            self.resource_list.index = min(index, max(0, len(self.resource_list.visible) - 1))
+        elif screen == "toolkit":
+            _, category, query, index = origin
+            self.open_toolkit(category)
+            self.toolkit_list.set_query(query)
+            self.toolkit_list.index = min(index, max(0, len(self.toolkit_list.visible) - 1))
+        self.navigate(screen, self._focus_for(screen))
+        return True
+
     def _key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
 
@@ -1179,10 +1212,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         def _quit(_event):
             self.quit()
 
-        @kb.add("c-k", filter=Condition(lambda: not self.busy and not self.toolkit_running() and self.screen in ("home", "toolkit", "resources") and not self.filter_active), eager=True)
+        @kb.add("c-k", filter=Condition(lambda: not self.busy and not self.toolkit_running() and self.screen in ("home", "toolkit", "resources", "devbox_info", "logs") and not self.filter_active), eager=True)
         def _palette(_event):
-            self.open_toolkit()
-            self._begin_filter()
+            self.open_palette()
 
         @kb.add("f1", filter=Condition(lambda: self.screen != "help"), eager=True)
         def _application_help(_event):
@@ -1220,6 +1252,11 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         def _review_devbox_info_key(_event):
             self._review_info_update()
 
+        @kb.add("tab", filter=Condition(lambda: self.screen == "toolkit_confirm"), eager=True)
+        def _switch_toolkit_confirm_focus(_event):
+            target = self.toolkit_plan_view if self.app.layout.has_focus(self.toolkit_confirm.window) else self.toolkit_confirm.window
+            self.app.layout.focus(target)
+
         @kb.add("tab", filter=Condition(lambda: self.screen == "resource_confirm"), eager=True)
         def _switch_resource_confirm_focus(_event):
             targets = [self.resource_confirm.window, self.resource_plan_text]
@@ -1251,9 +1288,13 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             focus = self._focus_for(screen)
             self.filter_active = False
         self.screen = screen
+        if screen == "toolkit_confirm":
+            self.toolkit_plan_view.text = self.toolkit_plan_lexer.set_fragments(self.toolkit_confirmation())
         if focus is not None:
             self.app.layout.focus(focus)
         self._invalidate()
+        if screen == "home":
+            self.palette_origin = None
         if screen == "home" and self.pending_update is not None and not self.busy:
             self._show_update_prompt()
 
@@ -1677,6 +1718,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             self.resource_scope = scope
             self.navigate("resources", self.resource_list.window)
             self.resource_refresh(force=True)
+        elif self.current_action == "clean" and not self.ux_legacy_parent:
+            self.open_cleaner()
         else:
             self.navigate("home", self.menu.window)
 
