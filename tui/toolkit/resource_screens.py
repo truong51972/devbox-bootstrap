@@ -7,7 +7,6 @@ import shlex
 import sys
 import time
 
-from prompt_toolkit.application import in_terminal
 from prompt_toolkit.layout import HSplit, VSplit, DynamicContainer
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.widgets import TextArea
@@ -17,6 +16,7 @@ from tui.ui import Entry, KeyboardList, status_style
 from tui.views import WIDE_LAYOUT_MIN, detail_panel_width
 from . import resources
 from .native import safe_text
+from .resource_batch import batch_command, needs_sudo, consent_entries
 
 
 class ResourceScreens:
@@ -41,6 +41,10 @@ class ResourceScreens:
         self.resource_result = TextArea(read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
         for field in (self.resource_detail, self.resource_plan_text, self.resource_result):
             self._bind_text(field)
+        self.resource_options = KeyboardList([], multiple=True, bulk_select=False,
+            on_enter=lambda: self.app.layout.focus(self.resource_confirm.window),
+            on_back=self.back, on_help=self._show_help, on_change=self._invalidate,
+            get_columns=self.columns)
         self.resource_confirm = KeyboardList([
             Entry("no", "Back — no changes"), Entry("preview", "Dry run — show commands"),
             Entry("yes", "Execute reviewed operations"),
@@ -56,10 +60,28 @@ class ResourceScreens:
             DynamicContainer(self.resource_layout), DynamicContainer(self._filter_layout),
         ]), "↑↓ Move  Space Select  a Missing  u Updates  n Clear  r Refresh  / Filter  i Details  m Adopt  e Advanced  Enter Review  Esc")
         self.views["resource_detail"] = self._page("Resource details", self.resource_detail, "↑↓ Scroll  Esc Back")
-        self.views["resource_confirm"] = self._page("Review changes", HSplit([
-            self.resource_plan_text, self._divider(), self.resource_confirm.window,
-        ]), "↑↓ Choose  Enter Confirm  Tab Scroll plan  Esc Back")
+        self.views["resource_confirm"] = self._page("Review changes", DynamicContainer(self.resource_review_layout),
+            "↑↓ Choose  Enter Confirm  Tab Focus  Space Options  Esc Back")
         self.views["resource_result"] = self._page("Resource operation result", self.resource_result, "↑↓ Scroll  Esc Back")
+
+    def resource_review_layout(self):
+        def build():
+            children = [self.resource_plan_text, self._divider()]
+            if self.resource_options.entries:
+                children.extend([self._text(lambda: [("class:section", "  OPTIONAL PRIVILEGED ACTIONS (OFF BY DEFAULT)")], height=1),
+                                 self.resource_options.window, self._divider()])
+            children.append(self.resource_confirm.window)
+            return HSplit(children)
+        return self._layout("resource-review", build)
+
+    def resource_prepare_confirmation(self):
+        self.resource_options.entries = consent_entries(self.resource_operations)
+        self.resource_options.current_values = []
+        self.resource_options.index = 0
+        self.resource_options.window.height = Dimension(min=1, preferred=len(self.resource_options.entries) + 1)
+        self._layout_cache.pop("resource-review", None)
+        self.resource_confirm.index = 0
+        self.navigate("resource_confirm", self.resource_confirm.window)
 
     def resource_open(self, scope):
         if self.busy:
@@ -208,8 +230,7 @@ class ResourceScreens:
         cmd = ("bash", str(ROOT / "utils/adopt-binary.sh"), sys.executable, row.key, row.installed_version)
         self.resource_operations = (resources.Operation("Adopt", row.key, row.name, cmd),)
         self.resource_plan_text.text = "ADOPT " + row.name + "\n" + row.path + "\nVersion: " + row.installed_version + "\n\nVerify official release SHA-256 and register ownership. No binary replacement.\n" + shlex.join(cmd)
-        self.resource_confirm.index = 0
-        self.navigate("resource_confirm", self.resource_confirm.window)
+        self.resource_prepare_confirmation()
 
     def resource_review(self):
         if self.busy or (self.resource_task and not self.resource_task.done()):
@@ -223,8 +244,7 @@ class ResourceScreens:
         self.resource_plan_text.text = "\n".join(
             f"{op.verb.upper():10} {op.name}\n  {shlex.join(op.command)}" for op in self.resource_operations)
         self.resource_plan_text.text += "\n\nUpdates use the original manager. Docker upgrades may restart the daemon.\nAI setup may install executable hooks; default target is global Codex.\nPonytail updates target Codex only; review /hooks after updating.\nSkill updates affect the named global skill (including agents sharing its directory)."
-        self.resource_confirm.index = 0
-        self.navigate("resource_confirm", self.resource_confirm.window)
+        self.resource_prepare_confirmation()
 
     def resource_confirm_action(self):
         choice = self.resource_confirm.current_value
@@ -241,31 +261,18 @@ class ResourceScreens:
         if not operations:
             self._notice("No executable operations.")
             return
-        self.busy = True
-        self.resource_result.text = "Running confirmed operations…"
-        self.navigate("resource_result", self.resource_result)
-        self.run_task = asyncio.create_task(self.resource_execute(operations))
+        self.resource_execute(self.resource_operations)
 
-    async def resource_execute(self, operations):
-        # The parent shell holds the existing operation lock across the batch.
-        # Every argument is generated by the trusted catalog and shell-quoted.
-        script = "set -e\nsource " + shlex.quote(str(ROOT / "utils/operation-lock.sh")) + "\ndevbox_acquire_lock\n"
-        for op in operations:
-            script += "printf '%s\\n' " + shlex.quote(op.verb + " " + op.name) + "\n" + shlex.join(op.command) + "\n"
-        try:
-            async with in_terminal():
-                process = await asyncio.create_subprocess_exec("bash", "-c", script, cwd=str(ROOT))
-                code = await process.wait()
-            self.resource_result.text = ("Batch completed. Verify refreshed inventory." if code == 0
-                else f"Batch stopped at the first failure (exit {code}). Later commands were not run.")
-        except OSError as exc:
-            self.resource_result.text = "Execution failed: " + safe_text(str(exc))
-        finally:
-            self.busy = False
-            self.resource_cache.pop(self.resource_scope, None)
-            self.resource_list.current_values = []
-            self.resource_refresh(force=True)
-            self._invalidate()
+    def resource_execute(self, operations):
+        """Dispatch the reviewed plan to the existing fullscreen execution engine."""
+        if self.busy:
+            return
+        self.dry_run = False
+        self._start_command("resources", batch_command(operations), [op.key for op in operations],
+                            resource_scope=self.resource_scope,
+                            labels={op.key: op.verb + " " + op.name for op in operations},
+                            consent=set(self.resource_options.current_values),
+                            needs_sudo=needs_sudo(operations, self.resource_scope))
 
     def resource_back(self):
         if self.screen == "resources":

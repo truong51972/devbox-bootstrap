@@ -399,3 +399,6 @@ Ponytail update detection verifies the enabled official unpinned Codex marketpla
 
 
 Resource status distinguishes `Manual update` (new release, no automatic ownership), `Check failed` (upstream query failed), and `Update unknown` (insufficient metadata). `M` on an eligible legacy kubectl/Minikube opens a separate confirmed adoption plan. Adoption verifies the exact official release SHA-256 for the installed version and architecture and records ownership without replacing the binary; `U` only selects verified automatic updates. APT checks resolve aliases and merged-/usr paths. Zsh checks the framework and autosuggestions Git upstream as well as APT.
+
+
+Reviewed resource batches use the same fullscreen Execution, Result, and Activity history as other managed operations. Sudo authentication alone may temporarily use the terminal. Optional privileged install actions are off by default; Tab cycles review, plan and options. Mixed batches retain a single operation lock, stop on failure and record per-resource outcomes. Enter/Esc from Result returns to the originating workspace and refreshes inventory. Home also exposes Update Devbox source directly; successful self-update still exits.
