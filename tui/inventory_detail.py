@@ -18,7 +18,7 @@ RECEIPTS = {"kubectl": Path("/usr/local/bin/kubectl"),
             "minikube": Path("/usr/local/bin/minikube")}
 
 
-def inspect_components():
+def inspect_component_details():
     result = {}
     packages = {}
     if shutil.which("dpkg-query"):
@@ -55,5 +55,10 @@ def inspect_components():
             source = "APT installed: " + ", ".join(installed) + "; active executable ownership not verified"
         else:
             source = "Installed; manager/ownership not verified"
-        result[code] = f"{binary}\n  {source}"
+        result[code] = (binary, source)
     return result
+
+
+def inspect_components():
+    """Compatibility text for the existing component detail pane."""
+    return {code: f"{path}\n  {evidence}" for code, (path, evidence) in inspect_component_details().items()}
