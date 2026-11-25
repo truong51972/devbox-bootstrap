@@ -47,8 +47,6 @@ from tui.cleaner import (BY_KEY as CLEANER_ITEMS, SAFE_KEYS, PROBE_GROUPS,
 FINISHED_STATES = FINAL_STATES
 # Stable width across Home, Components and History; remaining columns go to the list.
 MENU = (
-    ("quick", "Quick Actions"),
-    ("favorites", "Favorites"),
     ("environment", "Development Tools"),
     ("agents", "AI Agents"),
     ("network", "Networking"),
@@ -60,7 +58,6 @@ MENU = (
     ("health", "System Health"),
     ("logs", "Activity"),
     ("settings", "Settings & Update"),
-    ("exit", "Exit"),
 )
 MENU_GROUPS = {
     "quick": "QUICK ACCESS", "favorites": "QUICK ACCESS",
@@ -927,6 +924,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self._invalidate()
 
     def _active_list(self) -> KeyboardList:
+        if self.screen == "resources":
+            return self.resource_list
         if self.screen == "toolkit_ai_setup":
             return self.ai_setup_list
         if self.screen == "toolkit_table":
@@ -978,7 +977,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
     def _bind_text(self, widget, *, result=False, log_viewer=False) -> None:
         kb = KeyBindings()
 
-        @kb.add("c-k", filter=Condition(lambda: not self.busy and self.screen in ("home", "toolkit") and not self.filter_active), eager=True)
+        @kb.add("c-k", filter=Condition(lambda: not self.busy and self.screen in ("home", "toolkit", "resources") and not self.filter_active), eager=True)
         def _quick(_event):
             self.open_toolkit()
             self._begin_filter()
@@ -1049,7 +1048,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         def _quit(_event):
             self.quit()
 
-        @kb.add("c-k", filter=Condition(lambda: not self.busy and not self.toolkit_running() and self.screen in ("home", "toolkit") and not self.filter_active), eager=True)
+        @kb.add("c-k", filter=Condition(lambda: not self.busy and not self.toolkit_running() and self.screen in ("home", "toolkit", "resources") and not self.filter_active), eager=True)
         def _palette(_event):
             self.open_toolkit()
             self._begin_filter()
@@ -1074,6 +1073,13 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
                 self.app.layout.focus(self.confirm_plan)
             else:
                 self.app.layout.focus(self.options.window)
+
+        @kb.add("tab", filter=Condition(lambda: self.screen == "resource_confirm"), eager=True)
+        def _switch_resource_confirm_focus(_event):
+            if self.app.layout.has_focus(self.resource_confirm.window):
+                self.app.layout.focus(self.resource_plan_text)
+            else:
+                self.app.layout.focus(self.resource_confirm.window)
 
         @kb.add("?", filter=Condition(lambda: self.screen not in ("help", "toolkit_input") and not self.filter_active))
         def _help(_event):
@@ -1118,7 +1124,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         action = action or self.menu.current_value
         if action == "exit":
             self.quit()
-        elif action in ("quick", "favorites", "environment", "agents", "network", "system", "containers", "storage", "project", "utilities", "workflows", "health", "settings"):
+        elif action in ("environment", "agents"):
+            self.resource_open("ai" if action == "agents" else "development")
+        elif action in ("quick", "favorites", "network", "system", "containers", "storage", "project", "utilities", "workflows", "health", "settings"):
             categories = {"quick": None, "favorites": "Favorites", "environment": "Environment",
                           "agents": "Coding Agents", "network": "Networking", "system": "System",
                           "containers": "Containers", "storage": "Storage", "project": "Project",
@@ -1498,6 +1506,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         if self.busy:
             self._notice("A task is running; leaving would orphan the installer.")
             return
+        if self.screen.startswith("resource"):
+            self.resource_back()
+            return
         if self.screen.startswith("toolkit"):
             self.toolkit_back()
             return
@@ -1535,6 +1546,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
     def _focus_for(self, screen: str):
         return {
             "home": self.menu.window, "select": self.selector.window,
+            "resources": self.resource_list.window, "resource_detail": self.resource_detail,
+            "resource_confirm": self.resource_confirm.window, "resource_result": self.resource_result,
             "toolkit_ai_setup": self.ai_setup_list.window,
             "toolkit": self.toolkit_list.window, "toolkit_input": self.toolkit_input if self.ux_editor else self.ux_line,
             "toolkit_table": self.ux_table.window, "toolkit_row_detail": self.ux_detail,

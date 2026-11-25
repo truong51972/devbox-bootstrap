@@ -389,3 +389,10 @@ devbox agent setup copilot --yes              # optional CLI only
 ```
 
 Node.js and npm are prerequisites (Skills CLI needs Node.js >=22.20). The installer does not log in, configure authentication, automatically enable optional Coding Kit hooks, or upgrade existing CLIs. Packages and skills are downloaded from their upstream sources when explicitly confirmed. The preset uses explicit skill names and `-a codex`, never upstream `--all`.
+
+
+### Unified resource workspaces
+
+Open **Development Tools** or **AI Agents** directly from Home. Space selects resources, A selects recommended missing/incomplete resources, U adds all verified safe updates, N clears, R refreshes, I shows details, E opens advanced actions, and Enter reviews the mixed plan. Dry run shows commands without executing them. Ctrl+K opens the command palette (including Favorites). Updates use verified ownership and available versions, not just executable presence. Unknown or external managers are not automatically updated; use Advanced for per-agent integration targets, profile preview and skill checks. APT availability reflects local indexes; the existing upgrade backend refreshes them during execution.
+
+Ponytail update detection verifies the enabled official unpinned Codex marketplace and active plugin version against the upstream manifest. U refreshes only that marketplace and plugin; restart Codex and review `/hooks` afterwards. Coding Kit update detection compares each installed global Skills CLI lockfile tree SHA to the official repository tree (one request); U invokes `skills update <name> -g -y` for only the selected names. Shared global skill directories can affect other agents using the same skill. External/pinned/untracked sources, missing metadata, and ambiguous versions remain Update unknown, not auto-updated. Other Ponytail agent targets remain available through Advanced.

@@ -165,6 +165,8 @@ class ToolkitUX:
                 out += action_help(key)
         elif not application:
             topics = {
+                "resources": ("Manage resources", "Space selects a resource; a selects recommended missing/incomplete items; u adds verified updates; n clears; r refreshes; i shows details; e opens advanced tools; Enter reviews the plan. No changes occur without explicit confirmation."),
+                "resource_confirm": ("Review changes", "Choose dry run to inspect commands or Execute to apply the exact reviewed batch."),
                 "select": ("Select components", "Space toggles an item. Review dependencies and consent before applying."),
                 "cleaner": ("Safe cleanup", "Scan first. a selects eligible safe cleaners only. Manual resources require exact selection and explicit consent."),
                 "confirm": ("Review changes", "Check exact targets and optional changes. d switches dry-run when supported. Enter executes the displayed plan."),

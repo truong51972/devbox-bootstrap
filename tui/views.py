@@ -37,6 +37,8 @@ class DevboxViews:
     def _page(self, title, body, shortcut):
         compact = {
             "Overview": "↑↓ Move  Enter Open  Ctrl+K Search  q Quit",
+            "Development Tools": "Space Select  a Missing  u Updates  r Refresh  Enter Review  Esc",
+            "AI Agents": "Space Select  a Missing  u Updates  r Refresh  Enter Review  Esc",
             "Components": "↑↓ Move  Space Toggle  / Filter  i Info  r Refresh  Enter Next",
             "Cleaner": "Space Toggle  a Safe  / Filter  i Info  r Scan  Enter Next  Esc",
             "Confirm": "Space Options  d Dry-run  Enter Run  Esc Back",

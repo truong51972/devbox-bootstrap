@@ -69,7 +69,7 @@ class TUIBasicTests(unittest.TestCase):
 
     def test_menu_component_confirmation_and_dependencies(self):
         app = DevboxTUI()
-        self.assertEqual(app.menu.current_value, "quick")
+        self.assertEqual(app.menu.current_value, "environment")
         app.open_menu("install")
         self.assertEqual(app.screen, "select")
         app.available["docker"] = "Missing"
@@ -120,46 +120,63 @@ class TUIBasicTests(unittest.TestCase):
             self.assertIn("already active", app.message)
 
     def test_keyboard_only_navigation_in_live_terminal_session(self):
-        """Exercise the actual key bindings, not just screen methods."""
+        """Home opens the unified workspace in one key; review never mutates."""
         from prompt_toolkit.application.current import create_app_session
         from prompt_toolkit.input import create_pipe_input
         from prompt_toolkit.output import DummyOutput
+        from tui.toolkit.resources import Resource
+
+        rows = (
+            Resource("fzf", "fzf", "TOOLS", True, "Missing"),
+            Resource("uv", "uv", "TOOLS", True, "Installed", update="Available", can_update=True),
+        )
 
         async def scenario():
             with create_pipe_input() as input_pipe:
                 with create_app_session(input=input_pipe, output=DummyOutput()):
                     app = DevboxTUI()
-                    run = asyncio.create_task(app.app.run_async())
-                    try:
-                        await asyncio.sleep(0.10)
-                        input_pipe.send_text("jj\r\r")
-                        await asyncio.sleep(0.10)
-                        self.assertEqual(app.screen, "select")
-                        input_pipe.send_text(" ")  # Toggle current checkbox.
-                        await asyncio.sleep(0.10)
-                        self.assertTrue(app.selector.current_values)
-                        input_pipe.send_text("\r")
-                        await asyncio.sleep(0.10)
-                        self.assertEqual(app.screen, "confirm")
-                        input_pipe.send_text("d")
-                        await asyncio.sleep(0.10)
-                        self.assertTrue(app.dry_run)
-                        input_pipe.send_text("\x1b")
-                        await asyncio.sleep(0.15)
-                        self.assertEqual(app.screen, "select")
-                        input_pipe.send_text("\x1b")
-                        await asyncio.sleep(0.15)
-                        self.assertEqual(app.screen, "toolkit")
-                        self.assertEqual(app.toolkit_category, "Environment")
-                        input_pipe.send_text("\x1b")
-                        await asyncio.sleep(0.15)
-                        self.assertEqual(app.screen, "home")
-                        input_pipe.send_text("q")
-                        await asyncio.wait_for(run, 2)
-                    finally:
-                        if not run.done():
-                            app.app.exit()
+                    with patch("tui.toolkit.resources.local_rows", return_value=rows), \
+                         patch("tui.toolkit.resources.scan", return_value=rows):
+                        run = asyncio.create_task(app.app.run_async())
+                        try:
+                            await asyncio.sleep(0.10)
+                            input_pipe.send_text("\r")
+                            await asyncio.sleep(0.10)
+                            self.assertEqual(app.screen, "resources")
+                            self.assertEqual(app.resource_scope, "development")
+                            if app.resource_task:
+                                await app.resource_task
+                            input_pipe.send_text(" ")
+                            await asyncio.sleep(0.10)
+                            self.assertEqual(app.resource_list.current_values, ["fzf"])
+                            input_pipe.send_text("U")
+                            await asyncio.sleep(0.10)
+                            self.assertEqual(app.resource_list.current_values, ["fzf", "uv"])
+                            input_pipe.send_text("\r")
+                            await asyncio.sleep(0.10)
+                            self.assertEqual(app.screen, "resource_confirm")
+                            self.assertEqual(app.resource_confirm.current_value, "no")
+                            self.assertIn("INSTALL", app.resource_plan_text.text)
+                            self.assertIn("UPDATE", app.resource_plan_text.text)
+                            with patch.object(app, "resource_execute") as execute:
+                                input_pipe.send_text("j\r")
+                                await asyncio.sleep(0.10)
+                                self.assertEqual(app.screen, "resource_result")
+                                self.assertIn("DRY RUN", app.resource_result.text)
+                                execute.assert_not_called()
+                            input_pipe.send_text("\x1b")
+                            await asyncio.sleep(0.20)
+                            self.assertEqual(app.screen, "resources")
+                            input_pipe.send_text("\x1b")
+                            await asyncio.sleep(0.20)
+                            self.assertEqual(app.screen, "home")
+                            input_pipe.send_text("q")
                             await asyncio.wait_for(run, 2)
+                        finally:
+                            if not run.done():
+                                app.app.exit()
+                                await asyncio.wait_for(run, 2)
+                            await app.tasks.close()
 
         asyncio.run(scenario())
 

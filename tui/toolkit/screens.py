@@ -27,6 +27,7 @@ from .ux import ToolkitUX, action_help, validate_form
 from .guidance import guide_for
 from .collectors import collect
 from . import agent_setup
+from .resource_screens import ResourceScreens
 
 MANAGED = {
     "sys.terminate": ("Terminate process", "System", "Send SIGTERM to a verified user-owned PID.", "PID"),
@@ -52,7 +53,7 @@ LEGACY_ENTRIES = (
 )
 
 
-class ToolkitScreens(ToolkitUX):
+class ToolkitScreens(ToolkitUX, ResourceScreens):
     def init_toolkit(self):
         self.toolkit_cwd = os.environ.get("DEVBOX_INVOCATION_CWD") or str(Path.cwd())
         self.toolkit_category = None
@@ -83,6 +84,7 @@ class ToolkitScreens(ToolkitUX):
         self.toolkit_input = TextArea(multiline=True, scrollbar=True, wrap_lines=True)
         self.toolkit_result = TextArea(read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
         self.init_ux()
+        self.init_resources()
         self.toolkit_result.control.lexer = self.ux_result_lexer
         self.toolkit_confirm = KeyboardList(
             [Entry("no", "No — go back"), Entry("yes", "Yes — execute this action")],
@@ -123,6 +125,7 @@ class ToolkitScreens(ToolkitUX):
         self.toolkit_result.control.key_bindings = result_keys
 
     def build_toolkit_views(self):
+        self.build_resource_views()
         self.views["toolkit_ai_setup"] = self._page("AI Agents / Setup", HSplit([
             self._text(self.ai_setup_summary, height=3), self._divider(),
             DynamicContainer(self.ai_setup_layout), DynamicContainer(self._filter_layout),
@@ -301,6 +304,11 @@ class ToolkitScreens(ToolkitUX):
         rows = [Entry("legacy:" + key, label, category, "", desc)
                 for key, label, category, desc in LEGACY_ENTRIES
                 if self.toolkit_category in (None, category)]
+        if self.toolkit_category is None:
+            rows = [r for r in rows if r.group not in ("Environment", "Coding Agents")]
+            rows += [Entry("workspace:environment", "Development Tools", "Manage", description="Install, update and inspect tools"),
+                     Entry("workspace:agents", "AI Agents", "Manage", description="Install, update and configure AI agents"),
+                     Entry("workspace:favorites", "Favorites", "Quick access", description="Saved actions")]
         for a in ACTIONS:
             if self.toolkit_category not in (None, "Favorites", a.category):
                 continue
@@ -417,6 +425,9 @@ class ToolkitScreens(ToolkitUX):
         self.toolkit_plan = None
         self.toolkit_workflow = None
         self.toolkit_input.text = ""
+        if key.startswith("workspace:"):
+            self.open_menu(key.split(":", 1)[1])
+            return
         if key.startswith("legacy:"):
             action = key[7:]
             if action not in ("theme", "ai-setup"):
@@ -611,7 +622,12 @@ class ToolkitScreens(ToolkitUX):
                 self.toolkit_list.set_query("")
                 self._notice("Filter cleared. Esc returns home.")
             else:
-                self.navigate("home", self.menu.window)
+                if self.resource_advanced_parent:
+                    self.resource_advanced_parent = False
+                    self.navigate("resources", self.resource_list.window)
+                    self.resource_refresh(force=True)
+                else:
+                    self.navigate("home", self.menu.window)
         else:
             self.ux_clear_input()
             self.toolkit_result.text = ""
