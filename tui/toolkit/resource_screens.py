@@ -7,13 +7,14 @@ import shlex
 import sys
 import time
 
-from prompt_toolkit.layout import HSplit, VSplit, DynamicContainer
+from prompt_toolkit.layout import HSplit, DynamicContainer
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.widgets import TextArea
 
 from tui.backend import ROOT
 from tui.ui import Entry, KeyboardList, status_style
-from tui.views import WIDE_LAYOUT_MIN, detail_panel_width
+from tui.semantic import FragmentLexer, SemanticLexer
+from .settings import inventory_ttl
 from . import resources
 from .native import safe_text
 from .resource_batch import batch_command, needs_sudo, consent_entries
@@ -22,6 +23,7 @@ from .resource_batch import batch_command, needs_sudo, consent_entries
 class ResourceScreens:
     def init_resources(self):
         self.resource_scope = "development"
+        self.resource_filter = "All"
         self.resource_rows = ()
         self.resource_cache = {}
         self.resource_task = None
@@ -32,13 +34,15 @@ class ResourceScreens:
         self.resource_list = KeyboardList([], multiple=True, on_enter=self.resource_review,
             on_back=self.back, on_help=self._show_help, on_change=self._invalidate,
             on_filter=self._begin_filter, on_all=self.resource_defaults,
-            on_update=self.resource_updates, on_refresh=lambda: self.resource_refresh(force=True),
+            on_update=self.resource_updates, on_retry=self.resource_retry_checks, on_cycle=self.resource_cycle_filter,
+            on_refresh=lambda: self.resource_refresh(force=True),
             on_details=self.resource_show_details, on_edit=self.resource_advanced,
             on_adopt=self.resource_adopt,
             get_columns=self._component_list_width)
-        self.resource_detail = TextArea(read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
-        self.resource_plan_text = TextArea(read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
-        self.resource_result = TextArea(read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
+        self.resource_detail_lexer = FragmentLexer()
+        self.resource_detail = TextArea(lexer=self.resource_detail_lexer, read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
+        self.resource_plan_text = TextArea(lexer=SemanticLexer("plan"), read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
+        self.resource_result = TextArea(lexer=SemanticLexer("plan"), read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
         for field in (self.resource_detail, self.resource_plan_text, self.resource_result):
             self._bind_text(field)
         self.resource_options = KeyboardList([], multiple=True, bulk_select=False,
@@ -58,7 +62,7 @@ class ResourceScreens:
         self.views["resources"] = self._page(self.resource_title, HSplit([
             self._text(self.resource_summary, height=3), self._divider(),
             DynamicContainer(self.resource_layout), DynamicContainer(self._filter_layout),
-        ]), "↑↓ Move  Space Select  a Missing  u Updates  n Clear  r Refresh  / Filter  i Details  m Adopt  e Advanced  Enter Review  Esc")
+        ]), lambda: self.resource_list.shortcut_hints(Enter="Review", a="Recommended", c="Retry updates", g="Status filter", e="Advanced") + "  Ctrl+K Search")
         self.views["resource_detail"] = self._page("Resource details", self.resource_detail, "↑↓ Scroll  Esc Back")
         self.views["resource_confirm"] = self._page("Review changes", DynamicContainer(self.resource_review_layout),
             "↑↓ Choose  Enter Confirm  Tab Focus  Space Options  Esc Back")
@@ -89,6 +93,8 @@ class ResourceScreens:
         self.resource_scope = scope
         self.resource_advanced_parent = False
         self.resource_list.current_values = []
+        self.resource_filter = "All"
+        self.resource_list.entry_filter = None
         self.resource_list.set_query("")
         self.filter_active = False
         cached = self.resource_cache.get(scope)
@@ -100,8 +106,11 @@ class ResourceScreens:
     def resource_render_rows(self):
         key = self.resource_list.current_value
         self.resource_list.entries = [Entry(r.key, r.name, r.group, r.status,
-            " ".join((r.description, r.status, r.manager, r.evidence)), selectable=bool(r.action))
+            " ".join((r.description, r.installation, r.status, r.manager, r.evidence)), selectable=bool(r.action),
+            status_parts=r.status_parts)
             for r in self.resource_rows]
+        if self.resource_filter != "All":
+            self.resource_apply_filter()
         self.resource_list.index = next((i for i, e in enumerate(self.resource_list.visible) if e.key == key),
                                         min(self.resource_list.index, max(0, len(self.resource_list.visible) - 1)))
         self.resource_list.selected.intersection_update(e.key for e in self.resource_list.entries if e.selectable)
@@ -112,7 +121,7 @@ class ResourceScreens:
             return
         scope = self.resource_scope
         cached = self.resource_cache.get(scope)
-        if cached and not force and time.monotonic() - cached[0] < resources.TTL:
+        if cached and not force and time.monotonic() - cached[0] < inventory_ttl(self.preferences):
             self._notice("Cached inventory. R refreshes local and upstream status.")
             return
         try:
@@ -152,40 +161,41 @@ class ResourceScreens:
         if self.resource_scope == scope and self.screen in ("resources", "resource_detail", "resource_confirm", "resource_result", "help"):
             self.resource_rows = rows
             self.resource_render_rows()
-            self._notice("Inventory refreshed. Unknown versions are never auto-updated.")
+            self._notice("Inventory refreshed. U selects verified updates; C selects retryable checks.")
+        self._refresh_devbox_info()
 
     def resource_home_counts(self):
         for scope, key in (("development", "environment"), ("ai", "agents")):
             cached = self.resource_cache.get(scope)
             if cached:
-                count = sum(r.bulk_update for r in cached[1])
+                count = sum(r.verified_update for r in cached[1])
                 self.menu.entries = [replace(e, status=f"{count} updates" if count else "") if e.key == key else e
                                      for e in self.menu.entries]
 
     def resource_summary(self):
         rows = self.resource_rows
-        return [("class:section", "  " + self.resource_title().upper() + "\n"),
+        cached = self.resource_cache.get(self.resource_scope)
+        freshness = f"{int(time.monotonic() - cached[0])}s ago" if cached else "Not checked"
+        if self.resource_task and not self.resource_task.done() and self.resource_scan_scope == self.resource_scope:
+            freshness = "Checking…"
+        return [("class:section", "  " + self.resource_title().upper() + "  ·  "),
+                ("class:muted", freshness + "\n"),
                 ("class:installed", f"  {sum(r.installation == 'Installed' for r in rows)} installed"),
-                ("class:warning", f"  {sum(r.bulk_update for r in rows)} updates"),
-                ("class:missing", f"  {sum(r.installation == 'Missing' for r in rows)} missing\n"),
-                ("class:muted", f"  {len(self.resource_list.current_values)} selected · {sum(r.status == 'Update blocked' for r in rows)} blocked · {sum(r.status == 'Check failed' for r in rows)} failed · a missing / u updates")]
+                ("class:warning", f"  {sum(r.verified_update for r in rows)} updates"),
+                ("class:missing", f"  {sum(r.installation == 'Missing' for r in rows)} missing"),
+                ("class:muted", f"  {sum(r.retry_update for r in rows)} retryable\n"),
+                ("class:muted", f"  Filter: {self.resource_filter} · {len(self.resource_list.visible)}/{len(rows)} shown · {len(self.resource_list.current_values)} selected · g filter")]
 
     def resource_layout(self):
-        if self.columns() >= WIDE_LAYOUT_MIN:
-            return self._layout("resources-wide", lambda: VSplit([
-                self.resource_list.window, self._divider_v(),
-                self._text(self.resource_details, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
-            ], padding=1))
-        if self.rows() >= 25:
-            return self._layout("resources-medium", lambda: HSplit([
-                self.resource_list.window, self._divider(), self._text(self.resource_details, height=7)]))
-        return self.resource_list.window
+        return self._master_detail("resources", self.resource_list, self.resource_details, medium_height=7, min_columns=1)
 
     def resource_details(self):
         row = next((r for r in self.resource_rows if r.key == self.resource_list.current_value), None)
         if not row:
             return [("class:muted", "  No matching resource.")]
-        out = [("class:title", "  " + row.name + "\n\n"), (status_style(row.status), "  " + row.status + "\n"),
+        out = [("class:title", "  " + row.name + "\n\n"),
+               ("class:body", "  Installation: "), (status_style(row.installation), row.installation + "\n"),
+               ("class:body", "  Update: "), (status_style(row.status), (("Up to date" if row.status == "Installed" else row.status) if row.installation == "Installed" else "Not applicable") + "\n"),
                ("class:body", "  " + (row.description or row.group.title()) + "\n\n"),
                ("class:section", "  LIFECYCLE\n"),
                ("class:body", "  Installed: " + (row.installed_version or "Unknown") + "\n"
@@ -194,7 +204,7 @@ class ResourceScreens:
                 + "  Ownership: " + row.ownership + "\n"
                 + "  Path: " + (row.path or "—") + "\n"
                 + "  Recommended: " + ("Yes" if row.recommended else "Optional") + "\n"
-                + "  Action: " + (row.action or ("M — Adopt verified binary" if row.can_adopt else "No automatic action")) + "\n\n"),
+                + "  Action: " + (("Check & update" if row.retry_update else row.action) or ("M — Adopt verified binary" if row.can_adopt else "No automatic action")) + "\n\n"),
                ("class:muted", "  " + row.evidence + "\n")]
         if row.integrations:
             out.append(("class:section", "\n  AGENT INTEGRATIONS\n"))
@@ -204,7 +214,7 @@ class ResourceScreens:
         return [(style, safe_text(value)) for style, value in out]
 
     def resource_show_details(self):
-        self.resource_detail.text = "".join(text for _, text in self.resource_details())
+        self.resource_detail.text = self.resource_detail_lexer.set_fragments(self.resource_details())
         self.navigate("resource_detail", self.resource_detail)
 
     def resource_defaults(self):
@@ -212,8 +222,33 @@ class ResourceScreens:
         self._notice("Selected recommended missing or incomplete resources.")
 
     def resource_updates(self):
-        self.resource_list.selected.update(r.key for r in self.resource_rows if r.bulk_update)
-        self._notice("Selected available updates and retryable checks. Current tools can be selected individually.")
+        self.resource_list.selected.update(r.key for r in self.resource_rows if r.verified_update)
+        self._notice("Selected verified available updates. C selects retryable checks separately.")
+
+    def resource_retry_checks(self):
+        self.resource_list.selected.update(r.key for r in self.resource_rows if r.retry_update)
+        self._notice("Selected retryable update candidates. Review may run the verified provider.")
+
+    def resource_cycle_filter(self):
+        filters = ("All", "Installed", "Missing", "Updates", "Needs attention")
+        self.resource_filter = filters[(filters.index(self.resource_filter) + 1) % len(filters)]
+        self.resource_apply_filter()
+
+    def resource_apply_filter(self):
+        rows = {r.key: r for r in self.resource_rows}
+        def matches(entry):
+            row = rows.get(entry.key)
+            if not row:
+                return False
+            return {
+                "All": True, "Installed": row.installation == "Installed",
+                "Missing": row.installation == "Missing",
+                "Updates": row.verified_update,
+                "Needs attention": row.status in ("Update blocked", "Update unknown", "Check failed", "Partial", "Unverified", "Disabled"),
+            }[self.resource_filter]
+        self.resource_list.entry_filter = None if self.resource_filter == "All" else matches
+        self.resource_list.index = 0
+        self._invalidate()
 
     def resource_advanced(self):
         self.resource_advanced_parent = True
@@ -243,6 +278,9 @@ class ResourceScreens:
             return
         self.resource_plan_text.text = "\n".join(
             f"{op.verb.upper():10} {op.name}\n  {shlex.join(op.command)}" for op in self.resource_operations)
+        retry_count = sum(r.retry_update and r.key in self.resource_list.current_values for r in self.resource_rows)
+        if retry_count:
+            self.resource_plan_text.text += f"\n\nWarning: {retry_count} selected update candidates have no confirmed newer version; the provider will check again."
         self.resource_plan_text.text += "\n\nUpdates use the original manager. Current tools can be explicitly checked. Legacy Kubernetes binaries are checksum-verified before replacement. Docker upgrades may restart the daemon.\nAI setup may install executable hooks; default target is global Codex.\nPonytail updates target Codex only; review /hooks after updating.\nSkill updates affect the named global skill (including agents sharing its directory)."
         self.resource_prepare_confirmation()
 
@@ -280,9 +318,15 @@ class ResourceScreens:
                 self._cancel_filter()
             elif self.resource_list.query:
                 self.resource_list.set_query("")
+            elif self.resource_filter != "All":
+                self.resource_filter = "All"
+                self.resource_apply_filter()
+                self._notice("Status filter cleared. Esc returns.")
             else:
                 self.navigate("home", self.menu.window)
-        elif self.screen in ("resource_detail", "resource_confirm", "resource_result"):
+        elif self.screen == "resource_result":
+            self.navigate("resource_confirm", self.resource_confirm.window)
+        elif self.screen in ("resource_detail", "resource_confirm"):
             self.navigate("resources", self.resource_list.window)
             if self.screen == "resources" and not self.resource_cache.get(self.resource_scope):
                 self.resource_refresh()
