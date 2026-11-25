@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from prompt_toolkit.filters import Condition
+from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.layout import HSplit, VSplit, DynamicContainer, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
@@ -13,6 +14,21 @@ SPLIT_SPACING = 3  # One divider column and two VSplit padding columns.
 def detail_panel_width(columns: int) -> int:
     """Reserve half of the available split width, rounded toward details."""
     return max(1, (columns - SPLIT_SPACING + 1) // 2)
+
+
+def fit_shortcuts(hints: str, width: int) -> str:
+    """Keep complete key/label pairs; prioritize primary action, Back and Help."""
+    if width <= 0:
+        return ""
+    tokens = [part.strip() for part in hints.split("  ") if part.strip()]
+    if get_cwidth("  ".join(tokens)) <= width:
+        return "  ".join(tokens)
+    essential = [part for part in tokens if part.startswith(("Enter ", "Esc", "? ", "F1 "))]
+    result = []
+    for part in essential + [part for part in tokens if part not in essential]:
+        if get_cwidth("  ".join(result + [part])) <= width:
+            result.append(part)
+    return "  ".join(result) or (tokens[0][:width] if tokens else "")
 
 
 class DevboxViews:
@@ -35,20 +51,6 @@ class DevboxViews:
         )
 
     def _page(self, title, body, shortcut):
-        compact = {
-            "Overview": "↑↓ Move  Enter Open  R Check  U Update (Info)  q Quit",
-            "Development Tools": "Space Select  a Missing  u Updates  r Refresh  Enter Review  Esc",
-            "AI Agents": "Space Select  a Missing  u Updates  r Refresh  Enter Review  Esc",
-            "Components": "↑↓ Move  Space Toggle  / Filter  i Info  r Refresh  Enter Next",
-            "Cleaner": "Space Toggle  a Safe  / Filter  i Info  r Scan  Enter Next  Esc",
-            "Confirm": "Space Options  d Dry-run  Enter Run  Esc Back",
-            "Execution": "l Expand log  Exit locked",
-            "Result": "l Log  Enter Back  Esc Back",
-            "History": "↑↓ Move  / Filter  Enter Open  Esc Back",
-            "Log viewer": "↑↓ Scroll  o Pager  Esc Back",
-            "Keyboard help": "Esc Back",
-            "Component details": "Esc Back",
-        }
         def header_text():
             width = max(0, self.columns() - 2)
             name = title() if callable(title) else title
@@ -66,14 +68,10 @@ class DevboxViews:
             width = max(0, self.columns() - 2)
             name = title() if callable(title) else title
             hints = shortcut() if callable(shortcut) else shortcut
-            value = (self._confirm_shortcuts() if name == "Confirm" else
-                     compact.get(name, hints) if width < 85 else hints)
-            if "? Help" not in value and "F1 Help" not in value and name != "Keyboard help":
-                value += "   ? Help"
-            if len(value) > width:
-                tail = "   F1 Help   Esc"
-                value = self._truncate(value, max(0, width - len(tail) - 2)) + tail
-            return [("class:footer", self._truncate("  " + value, width))]
+            value = self._confirm_shortcuts() if name == "Confirm" else hints
+            if "? Help" not in value and "F1 Help" not in value and name not in ("Keyboard help", "Execution"):
+                value += "  ? Help"
+            return [("class:footer", "  " + fit_shortcuts(value, max(0, width - 2)))]
 
         return HSplit([
             self._text(header_text, height=1),
@@ -87,11 +85,11 @@ class DevboxViews:
         self.views["home"] = self._page(
             "Overview",
             DynamicContainer(self._home_layout),
-            "↑↓ Navigate   Enter Open   R Check update   U Review (Info)   Ctrl+K Search   q Quit",
+            lambda: self.menu.shortcut_hints(**{"r": "Check source", "u": "Review source" if self.menu.current_value == "devbox_info" else ""}) + "  Ctrl+K Search",
         )
         self.views["devbox_info"] = self._page(
             "Info", HSplit([self.devbox_info_view, self._divider(), self.devbox_info_actions.window]),
-            "↑↓ Choose  Enter Open  R Check update  U Review update  Tab Scroll  Esc Back",
+            "↑↓ Choose  Enter Open  R Check update  U Review update  Tab Scroll  Ctrl+K Search  Esc Back",
         )
         self.devbox_info_actions.window.height = Dimension(min=3, preferred=4, max=5)
         self.views["update_prompt"] = self._page(
@@ -106,12 +104,12 @@ class DevboxViews:
                 DynamicContainer(self._selection_layout),
                 DynamicContainer(lambda: self._filter_layout()),
             ]),
-            "↑↓ Move   Space Select   a All   n None   / Filter   i Info   r Refresh   Enter Next   Esc Back",
+            lambda: self.selector.shortcut_hints(Enter="Review", a="All filtered"),
         )
         self.views["cleaner"] = self._page(
             "Cleaner", HSplit([DynamicContainer(self._cleaner_layout),
                                DynamicContainer(self._filter_layout)]),
-            "Space Toggle   a All safe   n None   / Filter   i Info   r Refresh   Enter Next   Esc Back",
+            lambda: self.cleaner_list.shortcut_hints(Enter="Review", a="Safe preset", r="Scan"),
         )
         self.views["cleaner_info"] = self._page("Cleaner details", self.info_view, "Esc Back to Cleaner")
         self.views["confirm"] = self._page(
@@ -131,7 +129,7 @@ class DevboxViews:
                 DynamicContainer(self._logs_layout),
                 DynamicContainer(lambda: self._filter_layout()),
             ]),
-            "↑↓/j/k Browse   / Filter   Enter View log   Esc Back",
+            lambda: self.log_files.shortcut_hints(Enter="View log") + "  Ctrl+K Search",
         )
         self.views["view_log"] = self._page(
             "Log viewer", self.history_view,
@@ -140,6 +138,7 @@ class DevboxViews:
         self.views["help"] = self._page(
             "Keyboard help", self.help_view, "Esc Back",
         )
+        self.views["preview_detail"] = self._page("Details", self.info_view, "↑↓ Scroll  Esc Back")
         self.views["info"] = self._page(
             "Component details", self.info_view,
             "Esc Back to components",
@@ -153,6 +152,19 @@ class DevboxViews:
 
     def _divider_v(self):
         return Window(char="│", width=1, style="class:divider")
+
+    def _master_detail(self, key, widget, render, *, medium_height=0, min_columns=64):
+        """One responsive split policy, stable cached Windows and compact fallback."""
+        if self.columns() >= WIDE_LAYOUT_MIN:
+            return self._layout(key + "-wide", lambda: VSplit([
+                widget.window, self._divider_v(),
+                self._text(render, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
+            ], padding=1))
+        if medium_height and self.rows() >= 25 and self.columns() >= min_columns:
+            return self._layout(key + "-medium", lambda: HSplit([
+                widget.window, self._divider(), self._text(render, height=medium_height),
+            ]))
+        return widget.window
 
     def _home_layout(self):
         if self.columns() >= WIDE_LAYOUT_MIN:
@@ -168,17 +180,7 @@ class DevboxViews:
         return self.menu.window
 
     def _selection_layout(self):
-        if self.columns() >= WIDE_LAYOUT_MIN:
-            return self._layout("select-wide", lambda: VSplit([
-                self.selector.window, self._divider_v(),
-                self._text(self._component_details, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
-            ], padding=1))
-        if self.rows() >= 25 and self.columns() >= 64:
-            return self._layout("select-medium", lambda: HSplit([
-                self.selector.window, self._divider(),
-                self._text(self._component_details, height=6),
-            ]))
-        return self.selector.window
+        return self._master_detail("select", self.selector, self._component_details, medium_height=6)
 
     def _filter_layout(self):
         from prompt_toolkit.layout import ConditionalContainer
@@ -217,23 +219,27 @@ class DevboxViews:
                 self.confirm_plan.text = value
         self._invalidate()
 
+    def _review_body(self, plan, *, banner=None, options=None, consent_title=None, choices=None):
+        """Shared review layout; controllers retain their own authorization policy."""
+        children = []
+        if banner is not None:
+            children.extend([self._text(banner, height=1), self._divider()])
+        children.append(plan)
+        if options is not None and options.entries:
+            children.extend([self._divider(),
+                             self._text(lambda: [("class:section", consent_title())], height=1),
+                             options.window])
+            options.window.height = Dimension(min=1, preferred=min(8, len(options.entries) + 2), max=12)
+        if choices is not None:
+            children.extend([self._divider(), choices.window])
+        return HSplit(children)
+
     def _confirm_layout(self):
         def build():
-            # The plan is focusable/scrollable even when there are no options.
-            children = [self._text(self._confirm_mode, height=1), self._divider(),
-                        self.confirm_plan]
-            if self.options.entries:
-                children += [
-                    self._divider(),
-                    self._text(lambda: [("class:section",
-                        "  REQUIRED CONSENT" if self.action == "clean" else
-                        "  OPTIONS (OFF BY DEFAULT)")], height=1),
-                    self.options.window,
-                ]
-                # Allocate only as much space as the actual choices need.
-                self.options.window.height = Dimension(
-                    min=1, preferred=min(8, len(self.options.entries) + 2), max=12)
-            return HSplit(children)
+            return self._review_body(
+                self.confirm_plan, banner=self._confirm_mode, options=self.options,
+                consent_title=lambda: "  REQUIRED CONSENT" if self.action == "clean" else "  OPTIONS (OFF BY DEFAULT)",
+            )
         return self._layout("confirm", build)
 
     def _confirm_focus(self):
@@ -252,12 +258,7 @@ class DevboxViews:
         ]))
 
     def _logs_layout(self):
-        if self.columns() >= WIDE_LAYOUT_MIN:
-            return self._layout("logs-wide", lambda: VSplit([
-                self.log_files.window, self._divider_v(),
-                self._text(self._history_details, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
-            ], padding=1))
-        return self.log_files.window
+        return self._master_detail("logs", self.log_files, self._history_details)
 
     def _cleaner_layout(self):
         summary = lambda: self._text(self._cleaner_summary, height=2)

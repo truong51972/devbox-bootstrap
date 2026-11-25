@@ -9,7 +9,7 @@ import shutil
 
 from prompt_toolkit.application import in_terminal
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import HSplit, VSplit, DynamicContainer
+from prompt_toolkit.layout import HSplit, DynamicContainer
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.widgets import TextArea
 
@@ -17,10 +17,10 @@ from tui.ui import Entry, KeyboardList, status_style
 from tui.semantic import FragmentLexer
 from .inventory_view import InventoryList, detail_fragments
 from . import environment, agents
-from tui.views import WIDE_LAYOUT_MIN, detail_panel_width
+from tui.views import WIDE_LAYOUT_MIN
 from .registry import ACTIONS, BY_ID, execute
 from .operations import prepare, apply
-from .settings import favorites, toggle_favorite
+from .settings import favorites, toggle_favorite, set_preference, startup_updates, inventory_ttl, settings_path
 from .workflows import list_workflows
 from .native import safe_text, NativeError
 from .ux import ToolkitUX, action_help, validate_form
@@ -66,8 +66,9 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
         self.ai_setup_active = False
         self.ai_setup_list = KeyboardList([], multiple=True, on_all=self.ai_setup_defaults,
             on_enter=self.ai_setup_confirm, on_back=self.back, on_help=self._show_help,
-            on_change=self._invalidate, on_filter=self._begin_filter, get_columns=self._component_list_width)
+            on_change=self._invalidate, on_filter=self._begin_filter, on_details=lambda: self._show_preview(self.ai_setup_details), get_columns=self._component_list_width)
         self.toolkit_list = KeyboardList([], on_enter=self.toolkit_open_action,
+            on_details=lambda: self._show_preview(self.toolkit_details),
             on_back=self.back, on_help=self._show_help, on_change=self._invalidate,
             on_filter=self._begin_filter, on_favorite=self.toolkit_favorite,
             get_columns=self._component_list_width)
@@ -85,8 +86,11 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
         self.init_ux()
         self.init_resources()
         self.toolkit_result.control.lexer = self.ux_result_lexer
+        self.toolkit_plan_lexer = FragmentLexer()
+        self.toolkit_plan_view = TextArea(lexer=self.toolkit_plan_lexer, read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
+        self._bind_text(self.toolkit_plan_view)
         self.toolkit_confirm = KeyboardList(
-            [Entry("no", "No — go back"), Entry("yes", "Yes — execute this action")],
+            [Entry("no", "Cancel — no changes"), Entry("yes", "Apply reviewed action")],
             on_enter=self.toolkit_confirm_action, on_back=self.back,
             on_help=self._show_help, on_change=self._invalidate, get_columns=self.columns)
         keys = KeyBindings()
@@ -116,6 +120,7 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
         def _raw(_event):
             self.ux_show_raw()
         @result_keys.add("a")
+        @result_keys.add("x")
         def _related(_event):
             self.ux_open_related()
         @result_keys.add("?")
@@ -128,19 +133,19 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
         self.views["toolkit_ai_setup"] = self._page("AI Agents / Setup", HSplit([
             self._text(self.ai_setup_summary, height=3), self._divider(),
             DynamicContainer(self.ai_setup_layout), DynamicContainer(self._filter_layout),
-        ]), "↑↓ Move   Space Toggle   a Codex preset   / Filter   Enter Review   ? Help   Esc Back")
+        ]), lambda: self.ai_setup_list.shortcut_hints(Enter="Review", a="Codex preset"))
         self.views["toolkit"] = self._page(lambda: "AI Agents" if self.toolkit_category == "Coding Agents" else self.toolkit_category or "Quick actions", HSplit([
             self._text(self.ux_module_intro, height=3), self._divider(), DynamicContainer(self.toolkit_layout), DynamicContainer(self._filter_layout),
-        ]), "↑↓ Move   / Search   f Favorite   Enter Open   Esc Back")
+        ]), lambda: self.toolkit_list.shortcut_hints() + "  Ctrl+K Search")
         self.views["toolkit_input"] = self._page(lambda: self.ux_path("Input"), DynamicContainer(self.ux_form),
             lambda: "Ctrl+S Run   Tab Focus   F1 Help   Esc Back" if self.ux_editor else "Enter Run   Tab Next field   F1 Help   Esc Back")
         self.views["toolkit_result"] = self._page(lambda: self.ux_path("Result"), HSplit([self._text(self.ux_result_summary, height=3), self._divider(), self.toolkit_result]),
-            "↑↓ Scroll   r Repeat   e Edit   a Related   v Raw   ? Help   Esc Back")
+            "↑↓ Scroll   r Repeat   e Edit   x Related   v Raw   ? Help   Esc Back")
         self.views["toolkit_table"] = self._page(lambda: self.ux_path("Result"), HSplit([
             self._text(self.ux_table_summary, height=3), self._divider(), self.ux_table.window,
             DynamicContainer(self._filter_layout),
-        ]), "↑↓ Move   / Filter   s Sort   r Refresh   a Related   i Details   v Raw   ? Help   Esc Back")
-        self.views["toolkit_row_detail"] = self._page(lambda: self.ux_path("Details"), self.ux_detail, "↑↓ Scroll   ? Help   Esc Back")
+        ]), lambda: self.ux_table.shortcut_hints(Enter="Details", x="Related"))
+        self.views["toolkit_row_detail"] = self._page(lambda: self.ux_path("Details"), self.ux_detail, "↑↓ Scroll   x Related   ? Help   Esc Back")
         self.views["toolkit_raw"] = self._page(lambda: self.ux_path("Native output"), self.ux_raw, "↑↓ Scroll   Esc Back")
         self.views["toolkit_related"] = self._page(lambda: self.ux_path("Related actions"), self.ux_related.window, "↑↓ Move   Enter Open   Esc Back")
         for key, title in (("toolkit_tools", "Development tools / Inventory"),
@@ -148,12 +153,13 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
             self.views[key] = self._page(title, HSplit([
                 self._text(self.inventory_summary, height=lambda: Dimension.exact(4 if self.columns() < 80 else 3)), self._divider(),
                 DynamicContainer(self.inventory_layout), DynamicContainer(self._filter_layout),
-            ]), "↑↓ Move   / Filter   Enter/i Details   a Actions   r Refresh   Esc Back")
+            ]), lambda: self.inventory_list.shortcut_hints(Enter="Details"))
         self.views["toolkit_inventory_detail"] = self._page("Inventory / Details", self.inventory_detail,
             "↑↓ Scroll   Esc Back")
-        self.views["toolkit_confirm"] = self._page("Confirm action", HSplit([
-            self._text(self.toolkit_confirmation, height=6), self._divider(), self.toolkit_confirm.window,
-        ]), "↑↓ Choose   Enter Confirm   Esc Back")
+        self.views["toolkit_confirm"] = self._page("Review changes",
+            self._review_body(self.toolkit_plan_view, choices=self.toolkit_confirm),
+            "↑↓ Choose   Enter Confirm   Tab Review plan   Esc Back")
+        self.toolkit_confirm.window.height = Dimension(min=2, preferred=3, max=4)
 
     def ai_setup_summary(self):
         return [("class:title", "  CODEX-FIRST AI SETUP\n"),
@@ -161,12 +167,7 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
                 ("class:running", f"  {len(self.ai_setup_list.current_values)} selected · a restores recommended preset")]
 
     def ai_setup_layout(self):
-        if self.columns() >= WIDE_LAYOUT_MIN:
-            return self._layout("ai-setup-wide", lambda: VSplit([
-                self.ai_setup_list.window, self._divider_v(),
-                self._text(self.ai_setup_details, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
-            ], padding=1))
-        return self.ai_setup_list.window
+        return self._master_detail("ai-setup", self.ai_setup_list, self.ai_setup_details)
 
     def ai_setup_details(self):
         item = agent_setup.BY_KEY.get(self.ai_setup_list.current_value)
@@ -232,12 +233,7 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
         return out
 
     def inventory_layout(self):
-        if self.columns() >= WIDE_LAYOUT_MIN:
-            return self._layout("inventory-wide", lambda: VSplit([
-                self.inventory_list.window, self._divider_v(),
-                self._text(self.inventory_preview, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
-            ], padding=1))
-        return self.inventory_list.window
+        return self._master_detail("inventory", self.inventory_list, self.inventory_preview)
 
     def inventory_preview(self):
         return detail_fragments(self.inventory_list.rows.get(self.inventory_list.current_value))
@@ -310,13 +306,25 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
                      Entry("workspace:devbox_info", "Info", "Devbox", description="Devbox source status and workstation overview"),
                      Entry("workspace:update", "Update Devbox source", "Devbox", description="Fast-forward Devbox and exit on success."),
                      Entry("workspace:favorites", "Favorites", "Quick access", description="Saved actions")]
+        if self.toolkit_category in (None, "Settings"):
+            rows += self.preference_entries()
         for a in ACTIONS:
             if self.toolkit_category not in (None, "Favorites", a.category):
                 continue
             if self.toolkit_category == "Favorites" and a.id not in self.toolkit_favorites:
                 continue
-            rows.append(Entry(a.id, a.label, a.category if self.toolkit_category is None else a.guide.group, "★" if a.id in self.toolkit_favorites else "",
-                              " ".join((a.description, a.id, a.guide.use, a.guide.example))))
+            aliases = {"net.port": "port busy address in use bind conflict", "net.ports": "open listening ports",
+                       "storage.usage": "disk full free space", "storage.largest": "disk full large directories",
+                       "storage.files": "disk full big files", "sys.gpu": "GPU VRAM memory temperature",
+                       "sys.ssh-keys": "SSH key public key", "docker.ps": "container running stopped",
+                       "health.check": "diagnose troubleshoot prerequisites"}.get(a.id, "")
+            group = a.category if self.toolkit_category is None else a.guide.group
+            if self.toolkit_category is None and a.id in self.toolkit_favorites:
+                group = "FAVORITES"
+            elif self.toolkit_category is None and a.id in self.toolkit_recent:
+                group = "RECENT"
+            rows.append(Entry(a.id, a.label, group, "★" if a.id in self.toolkit_favorites else "",
+                              " ".join((a.description, a.id, a.guide.use, a.guide.example, aliases))))
         for key, (label, category, description, _) in MANAGED.items():
             if self.toolkit_category in (None, category):
                 rows.append(Entry(key, label, category, "", description + " " + key))
@@ -325,10 +333,39 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
                 rows.append(Entry("run:" + key, key, "Workflows", "", w.description))
         if self.toolkit_category is None:
             order = {key: index for index, key in enumerate(self.toolkit_recent)}
-            rows.sort(key=lambda r: (r.group, r.key not in self.toolkit_favorites, order.get(r.key, 999), r.label))
+            rows.sort(key=lambda r: ({"FAVORITES": 0, "RECENT": 1}.get(r.group, 2), r.group, order.get(r.key, 999), r.label))
         else:
             rows.sort(key=lambda r: (r.key != "legacy:ai-setup", not r.key.startswith("legacy:"), r.group, r.key != "legacy:install", r.label))
         return rows
+
+    def preference_entries(self):
+        return [Entry("preference:startup", "Startup update checks", "STARTUP", "Enabled" if startup_updates(self.preferences) else "Disabled", "Toggle background source checks. DEVBOX_CHECK_UPDATES overrides saved settings."),
+                Entry("preference:ttl", "Inventory cache lifetime", "INVENTORY", str(inventory_ttl(self.preferences)) + "s", "Cycle 1, 5, 15 and 60 minutes. R always refreshes."),
+                Entry("preference:theme", "Save current theme", "APPEARANCE", self.theme, "Persist the active theme; DEVBOX_THEME overrides it on launch."),
+                Entry("preference:paths", "Configuration paths", "CONFIGURATION", description=str(settings_path()))]
+
+    def preference_action(self, key):
+        if key == "paths":
+            self._show_preview(lambda: [("class:title", "  Configuration\n\n"), ("class:body", str(settings_path()) + "\n"), ("class:muted", "  Devbox state and log paths are also available in Info.")])
+            return
+        try:
+            if key == "startup":
+                if "DEVBOX_CHECK_UPDATES" in os.environ:
+                    self._notice("DEVBOX_CHECK_UPDATES overrides this setting; unset it first.", style="class:warning")
+                    return
+                self.preferences = set_preference("startup_updates", not startup_updates(self.preferences))
+            elif key == "ttl":
+                values = (60, 300, 900, 3600)
+                self.preferences = set_preference("inventory_ttl", values[(values.index(inventory_ttl(self.preferences)) + 1) % len(values)])
+            elif key == "theme":
+                self.preferences = set_preference("theme", self.theme)
+        except (OSError, ValueError) as exc:
+            self._notice("Could not save preference: " + str(exc), style="class:error")
+            return
+        current = self.toolkit_list.current_value
+        self.toolkit_list.entries = self.toolkit_entries()
+        self.toolkit_list.index = next((i for i, e in enumerate(self.toolkit_list.visible) if e.key == current), 0)
+        self._notice("Preference saved. Environment overrides remain authoritative.", style="class:installed")
 
     def open_toolkit(self, category=None):
         if self.busy:
@@ -353,29 +390,20 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
         self.navigate("toolkit", self.toolkit_list.window)
 
     def toolkit_layout(self):
-        if self.columns() >= WIDE_LAYOUT_MIN:
-            return self._layout("toolkit-wide", lambda: VSplit([
-                self.toolkit_list.window, self._divider_v(),
-                self._text(self.toolkit_details, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
-            ], padding=1))
-        if self.rows() >= 25 and self.columns() >= 64:
-            return self._layout("toolkit-medium", lambda: HSplit([
-                self.toolkit_list.window, self._divider(), self._text(self.toolkit_details, height=6),
-            ]))
-        return self.toolkit_list.window
+        return self._master_detail("toolkit", self.toolkit_list, self.toolkit_details, medium_height=6)
 
     def toolkit_details(self):
         entry = self.toolkit_list.current
         if entry is None:
             return [("class:muted", "  No matching action.")]
         action = BY_ID.get(entry.key)
-        mode = action.mode if action else "explicit confirmation"
+        mode = action.mode if action else "preference" if entry.key.startswith("preference:") else "explicit confirmation"
         return [("class:section", "  " + (self.toolkit_category or "ALL ACTIONS").upper() + "\n\n"),
                 ("class:title", "  " + entry.label + "\n\n"),
                 ("class:body", "  " + entry.description + "\n\n"),
                 ("class:muted", "  Mode: " + mode + "\n\n"),
                 *action_help(entry.key),
-                ("class:muted", "\n  ? Help · f Favorite · / Search\n")]
+                ("class:muted", "\n  ? Help · i Full details · / Search\n")]
 
     def toolkit_favorite(self):
         key = self.toolkit_list.current_value
@@ -392,6 +420,7 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
         else:
             self.toolkit_favorites.discard(key)
         self.toolkit_list.entries = self.toolkit_entries()
+        self.toolkit_list.index = next((i for i, e in enumerate(self.toolkit_list.visible) if e.key == key), 0)
         self._notice("Favorite saved." if enabled else "Favorite removed.")
 
     def toolkit_prompt(self):
@@ -426,6 +455,9 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
         self.toolkit_plan = None
         self.toolkit_workflow = None
         self.toolkit_input.text = ""
+        if key.startswith("preference:"):
+            self.preference_action(key.split(":", 1)[1])
+            return
         if key.startswith("workspace:"):
             self.open_menu(key.split(":", 1)[1])
             return
@@ -623,6 +655,8 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
                 self.toolkit_list.set_query("")
                 self._notice("Filter cleared. Esc returns home.")
             else:
+                if self.restore_palette_origin():
+                    return
                 if self.resource_advanced_parent:
                     self.resource_advanced_parent = False
                     self.navigate("resources", self.resource_list.window)

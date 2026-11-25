@@ -119,6 +119,7 @@ class Entry:
     status: str = ""
     description: str = ""
     selectable: bool = True
+    status_parts: tuple[tuple[str, str], ...] = ()  # label, semantic state
 
 
 class KeyboardList:
@@ -156,6 +157,8 @@ class KeyboardList:
         on_edit: Callable[[], None] | None = None,
         on_update: Callable[[], None] | None = None,
         on_adopt: Callable[[], None] | None = None,
+        on_cycle: Callable[[], None] | None = None,
+        on_retry: Callable[[], None] | None = None,
     ) -> None:
         self.entries = list(entries)
         self.multiple = multiple
@@ -166,6 +169,25 @@ class KeyboardList:
         self.get_columns = get_columns
         self.on_change = on_change
         self.on_manual_selection = on_manual_selection
+        self.entry_filter: Callable[[Entry], bool] | None = None
+        self._shortcuts = [("Enter", "Open"), ("↑↓", "Move")]
+        if multiple:
+            self._shortcuts.append(("Space", "Select"))
+        if multiple and bulk_select:
+            self._shortcuts.extend((("a", "All"), ("n", "Clear")))
+        for key, label, callback in (
+            ("u", "Updates", on_update), ("c", "Retry checks", on_retry),
+            ("g", "Status filter", on_cycle), ("r", "Refresh", on_refresh),
+            ("/", "Filter", on_filter), ("i", "Details", on_details),
+            ("x", "Actions", on_related), ("s", "Sort", on_sort),
+            ("f", "Favorite", on_favorite), ("e", "Edit", on_edit),
+            ("v", "Raw", on_raw), ("m", "Adopt", on_adopt),
+            ("t", "Theme", on_theme), ("d", "Dry-run", on_dry),
+            ("q", "Quit", on_quit),
+        ):
+            if callback:
+                self._shortcuts.append((key, label))
+        self._shortcuts.extend((("Esc", "Back"), ("?", "Help")))
 
         kb = KeyBindings()
 
@@ -235,6 +257,10 @@ class KeyboardList:
             def _raw(_event):
                 on_raw()
         if on_related:
+            @kb.add("x")
+            @kb.add("X")
+            def _related_shortcut(_event):
+                on_related()
             @kb.add("a")
             def _related(_event):
                 on_related()
@@ -260,6 +286,18 @@ class KeyboardList:
             @kb.add("R")
             def _refresh(_event) -> None:
                 on_refresh()
+
+        if on_cycle:
+            @kb.add("g")
+            @kb.add("G")
+            def _cycle(_event):
+                on_cycle()
+
+        if on_retry:
+            @kb.add("c")
+            @kb.add("C")
+            def _retry(_event):
+                on_retry()
 
         if multiple and bulk_select:
             @kb.add("a")
@@ -308,16 +346,20 @@ class KeyboardList:
             allow_scroll_beyond_bottom=False, style="class:body",
         )
 
+    def shortcut_hints(self, **labels) -> str:
+        """Render hints from registered callbacks, with context-specific labels."""
+        return "  ".join(f"{key} {labels.get(key, label)}" for key, label in self._shortcuts
+                         if labels.get(key, label))
+
     @property
     def visible(self) -> list[Entry]:
-        term = self.query.casefold().strip()
-        if not term:
-            return self.entries
-        return [
-            entry for entry in self.entries
-            if term in (entry.label + " " + entry.group + " "
-                        + entry.description + " " + entry.key).casefold()
-        ]
+        entries = self.entries if self.entry_filter is None else [e for e in self.entries if self.entry_filter(e)]
+        terms = self.query.casefold().split()
+        if not terms:
+            return entries
+        return [entry for entry in entries if all(term in (
+            entry.label + " " + entry.group + " " + entry.description + " " + entry.key
+        ).casefold() for term in terms)]
 
     @property
     def current(self) -> Entry | None:
@@ -396,8 +438,10 @@ class KeyboardList:
             marker = ">" if active else " "
             start = f" {marker} {prefix} "
             # Never let the status column crowd out the label on narrow panes.
-            show_status = bool(entry.status and width >= 43)
-            reserved = len(entry.status) + 2 if show_status else 0
+            parts = entry.status_parts or ((entry.status, entry.status),)
+            status_text = " · ".join(label for label, _ in parts)
+            show_status = bool(status_text and width >= 43)
+            reserved = len(status_text) + 2 if show_status else 0
             label_width = max(1, content_width - len(start) - reserved)
             label = entry.label
             if len(label) > label_width:
@@ -409,12 +453,12 @@ class KeyboardList:
                          "class:body")
             text = start + label
             if show_status:
-                gap = max(2, content_width - len(text) - len(entry.status))
+                gap = max(2, content_width - len(text) - len(status_text))
                 fragments.append((row_style, text + " " * gap))
-                fragments.append((
-                    focused_status_style(entry.status, active),
-                    entry.status + "\n",
-                ))
+                for pos, (label, state) in enumerate(parts):
+                    if pos:
+                        fragments.append((row_style, " · "))
+                    fragments.append((focused_status_style(state, active), label + ("\n" if pos == len(parts) - 1 else "")))
             else:
                 fragments.append((row_style, text + "\n"))
         return fragments

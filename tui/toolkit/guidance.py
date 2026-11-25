@@ -253,7 +253,8 @@ _DATA = {
     "limit": "Root and home may share a filesystem.",
     "related": [
       "storage.largest",
-      "storage.cache-sizes"
+      "storage.cache-sizes",
+      "legacy:clean"
     ]
   },
   "storage.largest": {

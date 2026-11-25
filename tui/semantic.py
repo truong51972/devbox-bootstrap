@@ -84,6 +84,9 @@ def plan_fragments(line: str) -> list[tuple[str, str]]:
     if text.startswith(("DRY RUN", "Warning:", "Sudo authentication required", "Manual items require",
                         "Select exact", "Select an agent target", "Unavailable safe cleaners")):
         return [("class:warning", line)]
+    token = text.split(maxsplit=1)[0] if text else ""
+    if token in ("INSTALL", "CONFIGURE", "UPDATE", "ADOPT", "SKIP"):
+        return [("class:warning" if token in ("UPDATE", "ADOPT", "SKIP") else "class:running", line)]
     if text.startswith(("Install:", "Upgrade:", "Clean:", "Update Devbox source")):
         return [("class:title", line)]
     if text.startswith(("Apply selected changes", "Agent targets:")):

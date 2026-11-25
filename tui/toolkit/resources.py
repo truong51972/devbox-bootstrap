@@ -71,6 +71,22 @@ class Resource:
         return ""
 
     @property
+    def verified_update(self):
+        return self.action == "Update" and self.update == "Available"
+
+    @property
+    def retry_update(self):
+        return self.action == "Update" and self.update in ("Unknown", "Failed")
+
+    @property
+    def status_parts(self):
+        if self.installation != "Installed":
+            return ((self.installation, self.installation),)
+        label = {"Installed": "Current", "Update available": "Update", "Update blocked": "Blocked",
+                 "Update unknown": "Unknown", "Check failed": "Check failed", "Checking": "Checking"}.get(self.status, self.status)
+        return (("Installed", "Installed"), (label, self.status))
+
+    @property
     def bulk_update(self):
         return self.action == "Update" and self.update in ("Available", "Unknown", "Failed")
 

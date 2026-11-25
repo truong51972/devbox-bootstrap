@@ -46,6 +46,28 @@ def save(values):
         Path(name).unlink(missing_ok=True)
 
 
+def inventory_ttl(values):
+    value = values.get("inventory_ttl", 900)
+    return value if type(value) is int and value in (60, 300, 900, 3600) else 900
+
+
+def startup_updates(values):
+    value = os.environ.get("DEVBOX_CHECK_UPDATES")
+    return value != "0" if value is not None else values.get("startup_updates", True) is not False
+
+
+def theme(values):
+    value = os.environ.get("DEVBOX_THEME", values.get("theme", "minimal"))
+    return value.lower() if isinstance(value, str) and value.lower() in ("minimal", "mono") else "minimal"
+
+
+def set_preference(key, value):
+    values = load()
+    values[key] = value
+    save(values)
+    return values
+
+
 def favorites():
     from .registry import BY_ID
     value = load().get("favorites", [])

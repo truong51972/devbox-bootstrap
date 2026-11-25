@@ -37,6 +37,7 @@ from tui.update_check import REPOSITORY_URL, UpdateCheck, check_update
 from tui.views import DevboxViews, WIDE_LAYOUT_MIN, SPLIT_SPACING, detail_panel_width
 from tui.tasks import BackgroundTasks
 from tui.toolkit.screens import ToolkitScreens
+from tui.toolkit import settings as preferences
 import platform
 from tui.reporting import RunReport, read_report, write_report, summarize_status, status_lines
 from tui.execution import prepare_run, run_env, launch, wait_for_run
@@ -181,6 +182,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self.screen = "home"
         self.previous_screen = "home"
         self.help_return_screen = "home"
+        self.preview_return_screen = "home"
+        self.palette_origin = None
+        self.preferences = preferences.load()
         self.action = ""
         self.current_action = ""
         self.selected: list[str] = []
@@ -218,9 +222,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self.run_task: asyncio.Task[None] | None = None
         self.filter_active = False
         self._layout_cache: dict[str, object] = {}
-        self.theme = os.environ.get("DEVBOX_THEME", "minimal").lower()
-        if self.theme not in THEMES:
-            self.theme = "minimal"
+        self.theme = preferences.theme(self.preferences)
         self.expanded_log = False
 
         self.menu = self._make_menu()
@@ -245,7 +247,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         self.cleaner_all_requested = False
         self.cleaner_list = self._make_cleaner_list()
         self.options = self._make_options([])
-        self.confirm_plan = TextArea(text="", read_only=True, focusable=True,
+        self.confirm_plan = TextArea(lexer=SemanticLexer("plan"), text="", read_only=True, focusable=True,
                                      scrollbar=True, wrap_lines=True)
         self.history_reports = {}
         self.log_files = self._make_log_list([])
@@ -326,7 +328,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             return 24
 
     def _start_update_check(self, *, manual=False) -> None:
-        if not manual and os.environ.get("DEVBOX_CHECK_UPDATES", "1") == "0":
+        if not manual and not preferences.startup_updates(self.preferences):
             return
         if self.busy or self.toolkit_running():
             return
@@ -429,6 +431,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             on_change=self._invalidate,
             on_quit=self.quit,
             on_theme=self.toggle_theme,
+            on_details=lambda: self._show_preview(self._home_details),
             on_refresh=self._refresh_home_update,
             on_update=self._review_info_update,
             get_columns=self._component_list_width,
@@ -690,6 +693,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         done = len(self.cleaner_rows)
         total = len(CLEANER_ITEMS)
         ready = sum(row.available for row in self.cleaner_rows.values())
+        safe_ready = sum(row.available and key in SAFE_KEYS for key, row in self.cleaner_rows.items())
         selected = self.cleaner_list.current_values
         manual = sum(key not in SAFE_KEYS for key in selected)
         pending = len(SAFE_KEYS - self.cleaner_rows.keys()) if self._cleaner_all_pending() else 0
@@ -699,7 +703,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             ("class:running" if done < total else "class:checked",
              f"  {'Scanning' if done < total else 'Scan complete'} "
              f"[{'#' * filled}{'.' * (width - filled)}] {done}/{total}\n"),
-            ("class:installed", f"  Ready {ready}"),
+            ("class:installed", f"  Ready {ready} ({safe_ready} safe)"),
             ("class:body", f" | Selected {len(selected)} ("),
             ("class:warning" if manual else "class:muted", f"{manual} manual"),
             ("class:body", ")" + (f" | All safe: {pending} pending" if pending else
@@ -775,6 +779,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             on_help=self._show_help,
             on_change=self._invalidate,
             on_filter=self._begin_filter,
+            on_details=lambda: self._show_preview(self._history_details),
             get_columns=self._component_list_width,
         )
 
@@ -822,8 +827,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             if cached:
                 rows = cached[1]
                 out.extend([("class:body", f"  {label}: "),
-                            ("class:warning", f"{sum(r.bulk_update for r in rows)} update candidates"),
-                            ("class:missing", f" · {sum(r.installation == 'Missing' for r in rows)} missing\n")])
+                            ("class:warning", f"{sum(r.verified_update for r in rows)} verified updates"),
+                            ("class:missing", f" · {sum(r.installation == 'Missing' for r in rows)} missing\n"),
+                            ("class:muted", f"  {sum(r.retry_update for r in rows)} retryable · checked {int(time.monotonic() - cached[0])}s ago\n")])
             else:
                 out.append(("class:muted", f"  {label}: inventory not checked\n"))
         out.extend([("class:section", "\n  LOCAL STATE\n"),
@@ -1035,13 +1041,18 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             *output,
         ]
 
+    def _show_preview(self, render) -> None:
+        self.preview_return_screen = self.screen
+        self.info_view.text = self.info_lexer.set_fragments(render())
+        self.navigate("preview_detail", self.info_view)
+
     def _show_component_info(self) -> None:
         self.info_view.text = self.info_lexer.set_fragments(self._component_details(full=True))
         self.navigate("info", self.info_view)
 
     def _begin_filter(self) -> None:
         self.filter_active = True
-        self.filter_input.text = ""
+        self.filter_input.text = self._active_list().query
         self.app.layout.focus(self.filter_input)
         self._notice("Filter by name or description. Enter to return to the list.")
         self._invalidate()
@@ -1100,10 +1111,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
     def _bind_text(self, widget, *, result=False, log_viewer=False) -> None:
         kb = KeyBindings()
 
-        @kb.add("c-k", filter=Condition(lambda: not self.busy and self.screen in ("home", "toolkit", "resources") and not self.filter_active), eager=True)
+        @kb.add("c-k", filter=Condition(lambda: not self.busy and self.screen in ("home", "toolkit", "resources", "devbox_info", "logs") and not self.filter_active), eager=True)
         def _quick(_event):
-            self.open_toolkit()
-            self._begin_filter()
+            self.open_palette()
 
         @kb.add("escape")
         def _back(_event):
@@ -1160,6 +1170,39 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
 
         widget.control.key_bindings = kb
 
+    def open_palette(self):
+        if self.screen == "resources":
+            self.palette_origin = ("resources", self.resource_scope, self.resource_list.query, self.resource_list.index, self.resource_filter, list(self.resource_list.current_values))
+        elif self.screen == "toolkit" and self.toolkit_category is not None:
+            self.palette_origin = ("toolkit", self.toolkit_category, self.toolkit_list.query, self.toolkit_list.index)
+        elif self.screen in ("home", "devbox_info", "logs", "cleaner"):
+            self.palette_origin = (self.screen,)
+        self.open_toolkit()
+        self._begin_filter()
+
+    def restore_palette_origin(self):
+        origin = self.palette_origin
+        self.palette_origin = None
+        if not origin:
+            return False
+        screen = origin[0]
+        if screen == "resources":
+            _, scope, query, index, status_filter, selected = origin
+            if self.resource_scope != scope:
+                self.resource_open(scope)
+            self.resource_filter = status_filter
+            self.resource_apply_filter()
+            self.resource_list.set_query(query)
+            self.resource_list.current_values = selected
+            self.resource_list.index = min(index, max(0, len(self.resource_list.visible) - 1))
+        elif screen == "toolkit":
+            _, category, query, index = origin
+            self.open_toolkit(category)
+            self.toolkit_list.set_query(query)
+            self.toolkit_list.index = min(index, max(0, len(self.toolkit_list.visible) - 1))
+        self.navigate(screen, self._focus_for(screen))
+        return True
+
     def _key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
 
@@ -1171,14 +1214,13 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         def _quit(_event):
             self.quit()
 
-        @kb.add("c-k", filter=Condition(lambda: not self.busy and not self.toolkit_running() and self.screen in ("home", "toolkit", "resources") and not self.filter_active), eager=True)
+        @kb.add("c-k", filter=Condition(lambda: not self.busy and not self.toolkit_running() and self.screen in ("home", "toolkit", "resources", "devbox_info", "logs") and not self.filter_active), eager=True)
         def _palette(_event):
-            self.open_toolkit()
-            self._begin_filter()
+            self.open_palette()
 
         @kb.add("f1", filter=Condition(lambda: self.screen != "help"), eager=True)
         def _application_help(_event):
-            self._show_help(application=self.screen != "toolkit_input")
+            self._show_help(application=False)
 
         @kb.add("y", filter=Condition(lambda: self.screen == "update_prompt"), eager=True)
         @kb.add("Y", filter=Condition(lambda: self.screen == "update_prompt"), eager=True)
@@ -1212,6 +1254,11 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         def _review_devbox_info_key(_event):
             self._review_info_update()
 
+        @kb.add("tab", filter=Condition(lambda: self.screen == "toolkit_confirm"), eager=True)
+        def _switch_toolkit_confirm_focus(_event):
+            target = self.toolkit_plan_view if self.app.layout.has_focus(self.toolkit_confirm.window) else self.toolkit_confirm.window
+            self.app.layout.focus(target)
+
         @kb.add("tab", filter=Condition(lambda: self.screen == "resource_confirm"), eager=True)
         def _switch_resource_confirm_focus(_event):
             targets = [self.resource_confirm.window, self.resource_plan_text]
@@ -1243,9 +1290,13 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             focus = self._focus_for(screen)
             self.filter_active = False
         self.screen = screen
+        if screen == "toolkit_confirm":
+            self.toolkit_plan_view.text = self.toolkit_plan_lexer.set_fragments(self.toolkit_confirmation())
         if focus is not None:
             self.app.layout.focus(focus)
         self._invalidate()
+        if screen == "home":
+            self.palette_origin = None
         if screen == "home" and self.pending_update is not None and not self.busy:
             self._show_update_prompt()
 
@@ -1669,6 +1720,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             self.resource_scope = scope
             self.navigate("resources", self.resource_list.window)
             self.resource_refresh(force=True)
+        elif self.current_action == "clean" and not self.ux_legacy_parent:
+            self.open_cleaner()
         else:
             self.navigate("home", self.menu.window)
 
@@ -1682,7 +1735,9 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
         if self.screen.startswith("toolkit"):
             self.toolkit_back()
             return
-        if self.screen == "help":
+        if self.screen == "preview_detail":
+            self.navigate(self.preview_return_screen, self._focus_for(self.preview_return_screen))
+        elif self.screen == "help":
             target = self.help_return_screen
             self.navigate(target, self.ux_help_focus or self._focus_for(target))
         elif self.screen == "view_log":
@@ -1736,7 +1791,7 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             "cleaner": self.cleaner_list.window,
             "confirm": self._confirm_focus(), "result": self.results_view,
             "logs": self.log_files.window, "view_log": self.history_view,
-            "run": self.status_view, "info": self.info_view, "cleaner_info": self.info_view,
+            "run": self.status_view, "info": self.info_view, "cleaner_info": self.info_view, "preview_detail": self.info_view,
         }.get(screen, self.help_view)
 
     def quit(self) -> None:

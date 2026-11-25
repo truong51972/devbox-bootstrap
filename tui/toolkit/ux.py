@@ -79,6 +79,9 @@ class ToolkitUX:
         self.ux_detail = TextArea(lexer=self.ux_detail_lexer, read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
         self.ux_raw = TextArea(read_only=True, focusable=True, scrollbar=True, wrap_lines=True)
         self._bind_text(self.ux_detail)
+        @self.ux_detail.control.key_bindings.add("x")
+        def _row_actions(_event):
+            self.ux_open_related()
         self._bind_text(self.ux_raw)
         self.ux_table = ResultTable([], on_enter=self.ux_show_row, on_back=self.back,
             on_help=self._show_help, on_change=self._invalidate, on_filter=self._begin_filter,
@@ -166,7 +169,7 @@ class ToolkitUX:
         elif not application:
             topics = {
                 "home": ("Overview", "Development Tools and AI Agents share Manage. Info shows the workstation summary. R checks Devbox source updates again; U on Info reviews a source update; Enter opens the full Info page or selected action. Source updates are fast-forward only and exit on success."),
-                "resources": ("Manage resources", "Space selects a resource; a selects recommended missing/incomplete items; u adds verified updates; n clears; r refreshes; i shows details; e opens advanced tools; Enter reviews the plan. No changes occur without explicit confirmation."),
+                "resources": ("Manage resources", "Space selects a resource; a selects recommended missing/incomplete items; u adds verified updates; c selects retryable checks; g cycles status filters; n clears; r refreshes; i shows details; e opens advanced tools; Enter reviews the plan. No changes occur without explicit confirmation."),
                 "resource_confirm": ("Review changes", "Choose dry run to inspect commands or Execute to apply the exact reviewed batch."),
                 "select": ("Select components", "Space toggles an item. Review dependencies and consent before applying."),
                 "cleaner": ("Safe cleanup", "Scan first. a selects eligible safe cleaners only. Manual resources require exact selection and explicit consent."),
@@ -179,7 +182,7 @@ class ToolkitUX:
                 title, description = topics[screen]
                 out += [("class:title", "  " + title.upper() + "\n\n"), ("class:body", "  " + description + "\n\n")]
         out += [("class:section", "\n  KEYBOARD\n"),
-                ("class:body", "  Enter  Open / run / confirm\n  Esc    Back\n  ↑↓     Navigate or scroll\n  /      Filter lists\n  ?      Context help (list/result)\n  F1     Help while editing\n  Ctrl+K Search from home or catalog\n  Ctrl+S Run multiline editor\n  Tab    Change form/editor focus\n  Ctrl+Q Quit\n")]
+                ("class:body", "  Enter  Open / run / confirm\n  Esc    Back\n  ↑↓     Navigate or scroll\n  /      Filter lists\n  ?      Context help (list/result)\n  F1     Context help, including editing\n  i      Full details when available\n  x      Related actions when available\n  Ctrl+K Search from home or catalog\n  Ctrl+S Run multiline editor\n  Tab    Change form/editor focus\n  Ctrl+Q Quit\n")]
         return out
 
     def ux_open_form(self, value=""):
@@ -317,7 +320,7 @@ class ToolkitUX:
         visible = len(self.ux_table.visible)
         total = len(self.ux_table.entries)
         return [("class:" + result.tone, "  " + safe_text(result.summary) + "\n"),
-                ("class:muted", f"  {visible}/{total} rows · Enter details · a related actions\n"),
+                ("class:muted", f"  {visible}/{total} rows · Enter details · x related actions\n"),
                 ("class:warning" if result.partial else "class:muted", "  " + safe_text(" · ".join(result.notes) or "Snapshot · refresh to check again"))]
 
     def ux_sort(self):
@@ -346,12 +349,15 @@ class ToolkitUX:
             self._notice("No related action available.")
             return
         self.inventory_operations = False
-        self.ux_related_parent = self.screen
-        row = self.ux_table.row if self.screen == "toolkit_table" else None
+        self.ux_related_parent = "toolkit_table" if self.screen == "toolkit_row_detail" else self.screen
+        row = self.ux_table.row if self.screen in ("toolkit_table", "toolkit_row_detail") else None
         values = dict(zip(self.ux_table.data.columns, (c.value for c in row))) if row else {}
         self.ux_targets = {}
         entries = []
         for key in guide.related:
+            if key == "legacy:clean":
+                entries.append(Entry(key, "Open Cleaner — review cleanup targets"))
+                continue
             if key.startswith(("legacy:", "run:")):
                 continue
             target = ""
@@ -382,6 +388,10 @@ class ToolkitUX:
             return
         key = self.ux_related.current_value
         if not key:
+            return
+        if key == "legacy:clean":
+            self.ux_legacy_parent = self.ux_related_parent
+            self.open_menu("clean")
             return
         action = BY_ID.get(self.toolkit_key)
         if action and not action.sensitive:
