@@ -10,12 +10,14 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 
 from tui.catalog import COMPONENTS, GROUPS, BINS, DEPENDENCIES, inventory
 from tui.inventory_detail import APT
 from tui.backend import ROOT, build_command
 from .agent_setup import ITEMS, EXTENSIONS, selection
 from .agents import agent_matrix
+from . import ai_resource_updates as ai_updates
 
 NPM = {"codex": "@openai/codex", "claude": "@anthropic-ai/claude-code",
        "copilot": "@github/copilot", "opencode": "opencode-ai",
@@ -98,7 +100,7 @@ def apt_newer(current, candidate):
 
 def skill_path(key):
     name = key.removeprefix("skill:")
-    return Path.home() / ".codex/skills" / name / "SKILL.md"
+    return ai_updates.skill_path(name)
 
 
 def local_rows(scope):
@@ -251,9 +253,12 @@ def probe(row):
     if row.key in NPM:
         return npm_probe(row)
     if row.key.startswith("skill:"):
-        return replace(row, update="Unknown", manager="Skills CLI", evidence="Codex global skill file exists; source revision not verified. Use Skills update check in Advanced.")
+        return row  # Enriched in scan using one shared upstream tree request.
     if row.key == "ponytail":
-        return replace(row, update="Unknown", manager="Agent plugin manager", evidence="Update through the verified agent plugin manager.")
+        info = ai_updates.ponytail_update()
+        return replace(row, update=info.state, manager="Codex plugin manager",
+                       installed_version=info.installed, available_version=info.candidate,
+                       evidence=info.reason, can_update=info.eligible)
     if row.key == "powerlevel10k":
         return git_probe(row)
     apt = apt_probe(row)
@@ -283,6 +288,18 @@ def scan(scope, rows):
             rows = tuple(enriched)
         except (OSError, ValueError, RuntimeError):
             rows = tuple(replace(r, installation="Unverified") if r.installation == "Checking" else r for r in rows)
+    if scope == "ai":
+        entries = ai_updates.skill_lock()
+        tree = ai_updates.kit_tree() if any(r.key.startswith("skill:") and r.installation == "Installed" for r in rows) else {}
+        enriched = []
+        for row in rows:
+            if row.key.startswith("skill:") and row.installation == "Installed":
+                info = ai_updates.skill_update(row.key[6:], entries, tree)
+                row = replace(row, update=info.state, manager="Skills CLI (global)",
+                              installed_version=info.installed, available_version=info.candidate,
+                              evidence=info.reason, can_update=info.eligible)
+            enriched.append(row)
+        rows = tuple(enriched)
     with ThreadPoolExecutor(max_workers=4) as pool:
         return tuple(pool.map(probe, rows))
 
@@ -319,7 +336,9 @@ def plan(scope, rows, keys):
             args = build_command("upgrade" if verb == "Update" else "install", [row.key])
             result.append(Operation(verb, row.key, row.name, tuple(args)))
         elif verb == "Update":
-            if row.key in NPM and row.key != "skills-cli":
+            if row.key == "ponytail" or row.key.startswith("skill:"):
+                args = ("bash", str(ROOT / "utils/ai-resource-update.sh"), sys.executable, row.key)
+            elif row.key in NPM and row.key != "skills-cli":
                 args = ("bash", str(ROOT / "utils/agent-update.sh"), row.key)
             else:
                 args = tuple(build_command("upgrade", [row.key]))

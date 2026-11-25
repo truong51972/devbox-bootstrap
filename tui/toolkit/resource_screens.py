@@ -193,7 +193,7 @@ class ResourceScreens:
             return
         self.resource_plan_text.text = "\n".join(
             f"{op.verb.upper():10} {op.name}\n  {shlex.join(op.command)}" for op in self.resource_operations)
-        self.resource_plan_text.text += "\n\nUpdates use the original manager. Docker upgrades may restart the daemon.\nAI setup may install executable hooks; default target is global Codex."
+        self.resource_plan_text.text += "\n\nUpdates use the original manager. Docker upgrades may restart the daemon.\nAI setup may install executable hooks; default target is global Codex.\nPonytail updates target Codex only; review /hooks after updating.\nSkill updates affect the named global skill (including agents sharing its directory)."
         self.resource_confirm.index = 0
         self.navigate("resource_confirm", self.resource_confirm.window)
 
