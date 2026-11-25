@@ -408,3 +408,5 @@ Installed resources with verified update providers can be selected even if curre
 Home groups Development Tools and AI Agents under Manage. The first Home row is Info. Its side panel shows source status (Up to date, Update available, Checking, Update blocked, Check failed or Not checked), installed/upstream revision, commit count, UTC check time, environment and cached inventory summaries. Enter opens the full Info view, including on narrow terminals; U on Info reviews a source update. Press R on Home for a fresh check (even when startup checks are disabled); the existing confirmation and exit-on-success behavior is unchanged.
 
 Self-update is available through Home Info (also searchable with Ctrl+K); Settings no longer duplicates it. CLI `devbox --update` and startup confirmation remain available.
+
+Info also displays the official repository URL (`https://github.com/truong51972/devbox-bootstrap`) without requiring network access or reading a custom checkout remote.

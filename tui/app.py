@@ -33,7 +33,7 @@ from tui.agent_status import AGENTS, LABELS, discover_agents, probe_agent_detail
 from tui.rtk_status import RtkInventory, inspect_rtk, executable_path as rtk_executable_path
 from tui.ui import Entry, KeyboardList, THEMES, STATUS_STYLES
 from tui.semantic import SemanticLexer, FragmentLexer, log_fragments, count_fragments
-from tui.update_check import UpdateCheck, check_update
+from tui.update_check import REPOSITORY_URL, UpdateCheck, check_update
 from tui.views import DevboxViews, WIDE_LAYOUT_MIN, SPLIT_SPACING, detail_panel_width
 from tui.tasks import BackgroundTasks
 from tui.toolkit.screens import ToolkitScreens
@@ -799,6 +799,8 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             reason = "Checking upstream; displayed revisions are from the last completed check."
         return [
             ("class:section", "  DEVBOX SOURCE\n"),
+            ("class:body", "  Repository: "),
+            ("class:running", REPOSITORY_URL + "\n"),
             ("class:body", "  Status: "), (STATUS_STYLES.get(status, "class:muted"), status + "\n"),
             ("class:body", "  Installed revision: " + (result.current[:12] if result and result.current else "Unknown") + "\n"),
             ("class:body", "  Upstream revision:  " + (result.latest[:12] if result and result.latest else "Unknown") + "\n"),

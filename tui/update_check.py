@@ -7,9 +7,10 @@ import os
 from pathlib import Path
 import signal
 
+REPOSITORY_URL = "https://github.com/truong51972/devbox-bootstrap"
 ORIGINS = {
-    "https://github.com/truong51972/devbox-bootstrap.git",
-    "https://github.com/truong51972/devbox-bootstrap",
+    REPOSITORY_URL + ".git",
+    REPOSITORY_URL,
     "git@github.com:truong51972/devbox-bootstrap.git",
 }
 CHECK_TIMEOUT = 12
