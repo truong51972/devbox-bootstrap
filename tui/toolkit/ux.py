@@ -181,6 +181,23 @@ class ToolkitUX:
             if screen in topics:
                 title, description = topics[screen]
                 out += [("class:title", "  " + title.upper() + "\n\n"), ("class:body", "  " + description + "\n\n")]
+        lists = {"home": self.menu, "resources": self.resource_list, "select": self.selector,
+                 "cleaner": self.cleaner_list, "logs": self.log_files, "toolkit": self.toolkit_list,
+                 "toolkit_ai_setup": self.ai_setup_list, "toolkit_tools": self.inventory_list,
+                 "toolkit_matrix": self.inventory_list, "toolkit_table": self.ux_table}
+        widget = lists.get(screen)
+        if not application and widget is not None:
+            labels = {"home": {"r": "Check source", "u": "Review source" if self.menu.current_value == "devbox_info" else ""},
+                      "resources": {"Enter": "Review", "a": "Recommended", "c": "Retry updates", "e": "Advanced"},
+                      "select": {"Enter": "Review", "a": "All filtered"},
+                      "cleaner": {"Enter": "Review", "a": "Safe preset", "r": "Scan"},
+                      "toolkit_ai_setup": {"Enter": "Review", "a": "Codex preset"},
+                      "logs": {"Enter": "View log"}, "toolkit_table": {"Enter": "Details", "x": "Related"},
+                      "toolkit_tools": {"Enter": "Details"}, "toolkit_matrix": {"Enter": "Details"}}
+            out.append(("class:section", "\n  AVAILABLE SHORTCUTS\n"))
+            for part in widget.shortcut_hints(**labels.get(screen, {})).split("  "):
+                key, sep, label = part.partition(" ")
+                out.extend([("class:key", "  " + key), ("class:body", sep + label + "\n")])
         out += [("class:section", "\n  KEYBOARD\n"),
                 ("class:body", "  Enter  Open / run / confirm\n  Esc    Back\n  ↑↓     Navigate or scroll\n  /      Filter lists\n  ?      Context help (list/result)\n  F1     Context help, including editing\n  i      Full details when available\n  x      Related actions when available\n  Ctrl+K Search from home or catalog\n  Ctrl+S Run multiline editor\n  Tab    Change form/editor focus\n  Ctrl+Q Quit\n")]
         return out

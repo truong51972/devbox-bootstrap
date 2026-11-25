@@ -7,6 +7,8 @@ from prompt_toolkit.layout import HSplit, VSplit, DynamicContainer, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 
+from tui.ui import cell_truncate
+
 WIDE_LAYOUT_MIN = 94
 SPLIT_SPACING = 3  # One divider column and two VSplit padding columns.
 
@@ -28,7 +30,22 @@ def fit_shortcuts(hints: str, width: int) -> str:
     for part in essential + [part for part in tokens if part not in essential]:
         if get_cwidth("  ".join(result + [part])) <= width:
             result.append(part)
-    return "  ".join(result) or (tokens[0][:width] if tokens else "")
+    return "  ".join(result) or (cell_truncate(tokens[0], width) if tokens else "")
+
+
+def shortcut_fragments(hints: str) -> list[tuple[str, str]]:
+    """Render keys separately from their labels without changing hint text."""
+    out = []
+    for part in hints.split("  "):
+        if not part.strip():
+            continue
+        if out:
+            out.append(("class:footer", "  "))
+        key, sep, label = part.strip().partition(" ")
+        out.append(("class:key", key))
+        if sep:
+            out.append(("class:footer", sep + label))
+    return out
 
 
 class DevboxViews:
@@ -44,20 +61,15 @@ class DevboxViews:
     @staticmethod
     def _truncate(message: str, width: int) -> str:
         """Prevent one-line header/footer/notice text from being clipped mid-key."""
-        if width <= 0:
-            return ""
-        return message if len(message) <= width else (
-            message[:max(0, width - 1)] + "…"
-        )
+        return cell_truncate(message, width)
 
     def _page(self, title, body, shortcut):
         def header_text():
             width = max(0, self.columns() - 2)
             name = title() if callable(title) else title
-            value = self._truncate(
-                f"  DEVBOX / {name.upper()}", width
-            )
-            return [("class:header", value)]
+            prefix = self._truncate("  DEVBOX / ", width)
+            return [("class:header", prefix),
+                    ("class:title", self._truncate(name, width - get_cwidth(prefix)))]
 
         def notice_text():
             return [(self.message_style, self._truncate(
@@ -71,7 +83,7 @@ class DevboxViews:
             value = self._confirm_shortcuts() if name == "Confirm" else hints
             if "? Help" not in value and "F1 Help" not in value and name not in ("Keyboard help", "Execution"):
                 value += "  ? Help"
-            return [("class:footer", "  " + fit_shortcuts(value, max(0, width - 2)))]
+            return [("class:footer", "  ")] + shortcut_fragments(fit_shortcuts(value, max(0, width - 2)))
 
         return HSplit([
             self._text(header_text, height=1),

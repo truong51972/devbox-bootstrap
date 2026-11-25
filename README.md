@@ -412,3 +412,7 @@ Home groups Development Tools and AI Agents under Manage. The first Home row is 
 Self-update is available through Home Info (also searchable with Ctrl+K); Settings no longer duplicates it. CLI `devbox --update` and startup confirmation remain available.
 
 Info also displays the official repository URL (`https://github.com/truong51972/devbox-bootstrap`) without requiring network access or reading a custom checkout remote.
+
+## TUI design and contributions
+
+See [DESIGN.md](docs/DESIGN.md) for the shared terminal interaction contract, visual rules, and verification matrix. Coding agents should use the repository-local [devbox-tui-design skill](.agents/skills/devbox-tui-design/SKILL.md) for UI changes. These are development references, not runtime dependencies or part of the AI agent installation preset.

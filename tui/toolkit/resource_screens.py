@@ -181,7 +181,11 @@ class ResourceScreens:
                 ("class:warning", f"  {sum(r.verified_update for r in rows)} updates"),
                 ("class:missing", f"  {sum(r.installation == 'Missing' for r in rows)} missing"),
                 ("class:muted", f"  {sum(r.retry_update for r in rows)} retryable\n"),
-                ("class:muted", f"  Filter: {self.resource_filter} · {len(self.resource_list.visible)}/{len(rows)} shown · {len(self.resource_list.current_values)} selected · g filter")]
+                ("class:muted", f"  Filter: {self.resource_filter} · {len(self.resource_list.visible)}/{len(rows)} shown · "),
+                ("class:title", f"{len(self.resource_list.current_values)} selected"),
+                ("class:warning" if set(self.resource_list.current_values) - {e.key for e in self.resource_list.visible} else "class:muted",
+                 f" ({len(set(self.resource_list.current_values) - {e.key for e in self.resource_list.visible})} hidden)" if set(self.resource_list.current_values) - {e.key for e in self.resource_list.visible} else ""),
+                ("class:muted", " · g filter")]
 
     def resource_layout(self):
         return self._master_detail("resources", self.resource_list, self.resource_details, medium_height=7, min_columns=1)
@@ -206,7 +210,14 @@ class ResourceScreens:
         if row.integrations:
             out.append(("class:section", "\n  AGENT INTEGRATIONS\n"))
             for integration in row.integrations:
-                out.append(("class:body", "  " + integration + "\n"))
+                name, sep, detail = integration.partition(": ")
+                state, dash, reason = detail.partition(" — ")
+                if sep:
+                    out.extend([("class:body", "  " + name + sep),
+                                (status_style(state), state),
+                                ("class:muted", dash + reason + "\n")])
+                else:
+                    out.append(("class:body", "  " + integration + "\n"))
             out.append(("class:muted", "  Default: Codex. E Advanced for other targets.\n"))
         return [(style, safe_text(value)) for style, value in out]
 

@@ -12,11 +12,12 @@ from prompt_toolkit.data_structures import Point
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Window
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.utils import get_cwidth
 
 
 STYLE = {
     "header": "bg:default fg:ansicyan bold",
-    "title": "fg:ansiwhite bold",
+    "title": "fg:default bold",
     "section": "fg:ansicyan bold",
     "muted": "fg:ansibrightblack",
     "divider": "fg:ansibrightblack",
@@ -27,9 +28,11 @@ STYLE = {
     "warning": "fg:ansibrightyellow",
     "error": "fg:ansibrightred bold",
     "running": "fg:ansicyan bold",
-    "footer": "fg:ansiwhite",
+    "footer": "fg:default",
+    "key": "fg:ansicyan bold",
+    "breadcrumb": "fg:default",
     "statusbar": "fg:ansibrightblack",
-    "body": "fg:ansiwhite",
+    "body": "fg:default",
 }
 MONO_STYLE = {
     # Works on monochrome terminals and themes without ANSI palette support.
@@ -45,7 +48,9 @@ MONO_STYLE = {
     "warning": "bold",
     "error": "reverse bold",
     "running": "bold",
-    "footer": "bold",
+    "footer": "",
+    "key": "bold",
+    "breadcrumb": "",
     "statusbar": "",
     "body": "",
 }
@@ -55,8 +60,10 @@ STATUS_STYLES = {
     "Installed": "class:installed",
     "Up to date": "class:installed",
     "Update available": "class:warning",
-    "Update unknown": "class:muted",
+    "Update unknown": "class:warning",
     "Update blocked": "class:warning",
+    "Manual update": "class:warning",
+    "Not applicable": "class:muted",
     "Check failed": "class:error",
     "Unknown": "class:muted",
     "Available": "class:installed",
@@ -86,6 +93,23 @@ STATUS_STYLES = {
     "COMPLETED": "class:installed",
     "CLEANED": "class:installed",
 }
+
+def cell_truncate(text: str, width: int) -> str:
+    """Fit terminal display cells (not Python character count)."""
+    if width <= 0:
+        return ""
+    if get_cwidth(text) <= width:
+        return text
+    out = []
+    used = 0
+    for char in text:
+        size = get_cwidth(char)
+        if used + size > width - 1:
+            break
+        out.append(char)
+        used += size
+    return "".join(out) + "…"
+
 
 def status_style(status: str) -> str:
     """Use the same semantic palette for component, run and cleaner rows."""
@@ -174,7 +198,7 @@ class KeyboardList:
         if multiple:
             self._shortcuts.append(("Space", "Select"))
         if multiple and bulk_select:
-            self._shortcuts.extend((("a", "All"), ("n", "Clear")))
+            self._shortcuts.extend((("a", "All filtered" if on_all is None and bulk_allowed is None else "Preset"), ("n", "Clear")))
         for key, label, callback in (
             ("u", "Updates", on_update), ("c", "Retry checks", on_retry),
             ("g", "Status filter", on_cycle), ("r", "Refresh", on_refresh),
@@ -441,11 +465,11 @@ class KeyboardList:
             parts = entry.status_parts or ((entry.status, entry.status),)
             status_text = " · ".join(label for label, _ in parts)
             show_status = bool(status_text and width >= 43)
-            reserved = len(status_text) + 2 if show_status else 0
-            label_width = max(1, content_width - len(start) - reserved)
-            label = entry.label
-            if len(label) > label_width:
-                label = label[:max(0, label_width - 1)] + "…"
+            # Keep enough room to recognize the resource even with two statuses.
+            show_status = show_status and get_cwidth(status_text) + 2 + get_cwidth(start) + 8 <= content_width
+            reserved = get_cwidth(status_text) + 2 if show_status else 0
+            label_width = max(0, content_width - get_cwidth(start) - reserved)
+            label = cell_truncate(entry.label, label_width)
 
             row_style = ("class:focus" if active else
                          "class:muted" if not entry.selectable else
@@ -453,7 +477,7 @@ class KeyboardList:
                          "class:body")
             text = start + label
             if show_status:
-                gap = max(2, content_width - len(text) - len(status_text))
+                gap = max(2, content_width - get_cwidth(text) - get_cwidth(status_text))
                 fragments.append((row_style, text + " " * gap))
                 for pos, (label, state) in enumerate(parts):
                     if pos:
