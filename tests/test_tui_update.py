@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from tui.app import DevboxTUI
-from tui.update_check import UpdateCheck, check_update
+from tui.update_check import REPOSITORY_URL, UpdateCheck, check_update
 
 
 class UpdateDiscoveryTests(unittest.IsolatedAsyncioTestCase):
@@ -87,6 +87,7 @@ class StartupUpdateTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.source_update_status, label)
             detail = "".join(value for _, value in app._home_details())
             self.assertIn(label, detail)
+            self.assertIn(REPOSITORY_URL, detail)
             self.assertIn("old-revision", detail)
             self.assertIn("new-revision", detail)
             self.assertIn("UTC", detail)
@@ -135,6 +136,7 @@ class StartupUpdateTests(unittest.IsolatedAsyncioTestCase):
         app.open_menu()
         self.assertEqual(app.screen, "devbox_info")
         self.assertIn("DEVBOX SOURCE", app.devbox_info_view.text)
+        self.assertIn(REPOSITORY_URL, app.devbox_info_view.text)
         self.assertIn("ENVIRONMENT", app.devbox_info_view.text)
         app._review_info_update()
         self.assertEqual(app.screen, "confirm")
