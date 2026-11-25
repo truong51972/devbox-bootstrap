@@ -293,10 +293,18 @@ class LayoutTests(unittest.TestCase):
             with create_pipe_input() as pipe:
                 with create_app_session(input=pipe, output=DummyOutput()):
                     app = DevboxTUI()
+                    app.resource_refresh = lambda force=False: None
                     task = asyncio.create_task(app.app.run_async())
                     try:
                         await asyncio.sleep(0.10)
-                        pipe.send_text("jj\r\r")
+                        pipe.send_text("\r")
+                        await asyncio.sleep(0.10)
+                        self.assertEqual(app.screen, "resources")
+                        pipe.send_text("e")
+                        await asyncio.sleep(0.10)
+                        self.assertEqual(app.screen, "toolkit")
+                        app.toolkit_list.set_query("install tools")
+                        pipe.send_text("\r")
                         await asyncio.sleep(0.10)
                         app.selector.current_values = ["uv"]
                         app.selector.set_query("Docker Engine")
@@ -323,10 +331,18 @@ class LayoutTests(unittest.TestCase):
             with create_pipe_input() as pipe:
                 with create_app_session(input=pipe, output=DummyOutput()):
                     app = DevboxTUI()
+                    app.resource_refresh = lambda force=False: None
                     task = asyncio.create_task(app.app.run_async())
                     try:
                         await asyncio.sleep(0.10)
-                        pipe.send_text("jj\r\r")
+                        pipe.send_text("\r")
+                        await asyncio.sleep(0.10)
+                        self.assertEqual(app.screen, "resources")
+                        pipe.send_text("e")
+                        await asyncio.sleep(0.10)
+                        self.assertEqual(app.screen, "toolkit")
+                        app.toolkit_list.set_query("install tools")
+                        pipe.send_text("\r")
                         await asyncio.sleep(0.10)
                         app.selector.current_values = ["zsh", "docker", "keychain"]
                         pipe.send_text("\r")
@@ -357,10 +373,18 @@ class LayoutTests(unittest.TestCase):
             with create_pipe_input() as pipe:
                 with create_app_session(input=pipe, output=DummyOutput()):
                     app = DevboxTUI()
+                    app.resource_refresh = lambda force=False: None
                     task = asyncio.create_task(app.app.run_async())
                     try:
                         await asyncio.sleep(0.1)
-                        pipe.send_text("jj\r\r")
+                        pipe.send_text("\r")
+                        await asyncio.sleep(0.10)
+                        self.assertEqual(app.screen, "resources")
+                        pipe.send_text("e")
+                        await asyncio.sleep(0.10)
+                        self.assertEqual(app.screen, "toolkit")
+                        app.toolkit_list.set_query("install tools")
+                        pipe.send_text("\r")
                         await asyncio.sleep(0.1)
                         app.selector.current_values = ["fzf"]
                         pipe.send_text("\r")
@@ -484,64 +508,70 @@ class LayoutTests(unittest.TestCase):
         self.assertIs(refreshed_logs.children[0], app.log_files.window)
 
     def test_compact_info_and_keyboard_search(self):
+        from tui.toolkit.resources import Resource
+
+        rows = (Resource("zsh", "Zsh + Oh My Zsh", "SHELL", True, "Missing"),
+                Resource("fzf", "fzf", "TOOLS", True, "Missing"))
+
         async def scenario():
             with create_pipe_input() as pipe:
                 with create_app_session(input=pipe, output=DummyOutput()):
                     app = DevboxTUI()
                     app.columns = lambda: 58
                     app.rows = lambda: 20
-                    task = asyncio.create_task(app.app.run_async())
-                    try:
-                        await asyncio.sleep(0.10)
-                        pipe.send_text("jj\r\r")
-                        await asyncio.sleep(0.10)
-                        self.assertEqual(app.screen, "select")
-                        self.assertIsInstance(app._selection_layout(), Window)
+                    with patch("tui.toolkit.resources.local_rows", return_value=rows), \
+                         patch("tui.toolkit.resources.scan", return_value=rows):
+                        task = asyncio.create_task(app.app.run_async())
+                        try:
+                            await asyncio.sleep(0.10)
+                            pipe.send_text("\r")
+                            await asyncio.sleep(0.10)
+                            self.assertEqual(app.screen, "resources")
+                            if app.resource_task:
+                                await app.resource_task
+                            self.assertIsInstance(app.resource_layout(), Window)
 
-                        pipe.send_text("i")
-                        await asyncio.sleep(0.10)
-                        self.assertEqual(app.screen, "info")
-                        self.assertIn("Zsh", app.info_view.text)
-                        pipe.send_text("\x1b")
-                        await asyncio.sleep(0.30)
-                        self.assertEqual(app.screen, "select")
+                            pipe.send_text("i")
+                            await asyncio.sleep(0.10)
+                            self.assertEqual(app.screen, "resource_detail")
+                            self.assertIn("Zsh", app.resource_detail.text)
+                            pipe.send_text("\x1b")
+                            await asyncio.sleep(0.30)
+                            self.assertEqual(app.screen, "resources")
 
-                        pipe.send_text("/")
-                        await asyncio.sleep(0.10)
-                        self.assertTrue(app.filter_active)
-                        pipe.send_text("fzf")
-                        await asyncio.sleep(0.10)
-                        self.assertEqual([x.key for x in app.selector.visible], ["fzf"])
-                        pipe.send_text("\r")
-                        await asyncio.sleep(0.10)
-                        self.assertFalse(app.filter_active)
-                        pipe.send_text(" ")
-                        await asyncio.sleep(0.10)
-                        self.assertEqual(app.selector.current_values, ["fzf"])
-                        pipe.send_text("\r")
-                        await asyncio.sleep(0.10)
-                        self.assertEqual(app.screen, "confirm")
-                        pipe.send_text("\x1b")
-                        await asyncio.sleep(0.30)
-                        self.assertEqual(app.screen, "select")
-                        self.assertEqual(app.selector.query, "fzf")
-                        pipe.send_text("\x1b")
-                        await asyncio.sleep(0.30)
-                        self.assertEqual(app.screen, "select")
-                        self.assertEqual(app.selector.query, "")
-                        pipe.send_text("\x1b")
-                        await asyncio.sleep(0.30)
-                        self.assertEqual(app.screen, "toolkit")
-                        self.assertEqual(app.toolkit_category, "Environment")
-                        pipe.send_text("\x1b")
-                        await asyncio.sleep(0.30)
-                        self.assertEqual(app.screen, "home")
-                        pipe.send_text("q")
-                        await asyncio.wait_for(task, 2)
-                    finally:
-                        if not task.done():
-                            app.app.exit()
+                            pipe.send_text("/")
+                            await asyncio.sleep(0.10)
+                            self.assertTrue(app.filter_active)
+                            pipe.send_text("fzf")
+                            await asyncio.sleep(0.10)
+                            self.assertEqual([x.key for x in app.resource_list.visible], ["fzf"])
+                            pipe.send_text("\r")
+                            await asyncio.sleep(0.10)
+                            self.assertFalse(app.filter_active)
+                            pipe.send_text(" ")
+                            await asyncio.sleep(0.10)
+                            self.assertEqual(app.resource_list.current_values, ["fzf"])
+                            pipe.send_text("\r")
+                            await asyncio.sleep(0.10)
+                            self.assertEqual(app.screen, "resource_confirm")
+                            pipe.send_text("\x1b")
+                            await asyncio.sleep(0.30)
+                            self.assertEqual(app.screen, "resources")
+                            self.assertEqual(app.resource_list.query, "fzf")
+                            pipe.send_text("\x1b")
+                            await asyncio.sleep(0.30)
+                            self.assertEqual(app.screen, "resources")
+                            self.assertEqual(app.resource_list.query, "")
+                            pipe.send_text("\x1b")
+                            await asyncio.sleep(0.30)
+                            self.assertEqual(app.screen, "home")
+                            pipe.send_text("q")
                             await asyncio.wait_for(task, 2)
+                        finally:
+                            if not task.done():
+                                app.app.exit()
+                                await asyncio.wait_for(task, 2)
+                            await app.tasks.close()
 
         asyncio.run(scenario())
 

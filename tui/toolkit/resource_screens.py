@@ -25,6 +25,7 @@ class ResourceScreens:
         self.resource_cache = {}
         self.resource_task = None
         self.resource_generation = 0
+        self.resource_scan_scope = None
         self.resource_operations = ()
         self.resource_advanced_parent = False
         self.resource_list = KeyboardList([], multiple=True, on_enter=self.resource_review,
@@ -95,11 +96,22 @@ class ResourceScreens:
         except RuntimeError:
             return
         if self.resource_task is not None and not self.resource_task.done():
-            self._notice("Inventory check already running.")
+            if self.resource_scan_scope != scope:
+                self._notice("Waiting for the previous workspace check to finish.")
+            else:
+                self._notice("Inventory check already running.")
             return
         self.resource_generation += 1
+        self.resource_scan_scope = scope
         self.resource_task = self.tasks.start("resources", self.resource_scan(scope, self.resource_generation))
+        self.resource_task.add_done_callback(self.resource_scan_finished)
         self._notice("Checking installed versions and available updates…", style="class:running")
+
+    def resource_scan_finished(self, task):
+        if task.cancelled() or task is not self.resource_task:
+            return
+        if self.screen == "resources" and self.resource_scope != self.resource_scan_scope:
+            self.resource_refresh()
 
     async def resource_scan(self, scope, generation):
         try:

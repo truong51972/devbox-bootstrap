@@ -1074,6 +1074,13 @@ class DevboxTUI(ToolkitScreens, DevboxViews):
             else:
                 self.app.layout.focus(self.options.window)
 
+        @kb.add("tab", filter=Condition(lambda: self.screen == "resource_confirm"), eager=True)
+        def _switch_resource_confirm_focus(_event):
+            if self.app.layout.has_focus(self.resource_confirm.window):
+                self.app.layout.focus(self.resource_plan_text)
+            else:
+                self.app.layout.focus(self.resource_confirm.window)
+
         @kb.add("?", filter=Condition(lambda: self.screen not in ("help", "toolkit_input") and not self.filter_active))
         def _help(_event):
             self._show_help()
