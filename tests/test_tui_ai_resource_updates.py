@@ -43,6 +43,12 @@ class AIResourceUpdatesTests(unittest.TestCase):
                 ["codex", "plugin", "marketplace", "upgrade", "ponytail"],
                 ["codex", "plugin", "add", "ponytail@ponytail"]])
 
+    def test_known_skill_source_can_retry_unavailable_upstream(self):
+        with patch.object(updates, "skill_path", return_value=Path(__file__)), patch.object(updates.shutil, "which", return_value="/bin/skills"):
+            info = updates.skill_update(NAME, {NAME: ENTRY}, {})
+        self.assertEqual(info.state, "Failed")
+        self.assertTrue(info.eligible)
+
     def test_unverified_never_runs(self):
         with patch.object(updates, "ponytail_update", return_value=updates.Update()), patch.object(updates.subprocess, "run") as run:
             with self.assertRaises(ValueError):

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 
@@ -19,6 +20,7 @@ from .agent_setup import ITEMS, EXTENSIONS, selection
 from .agents import agent_matrix
 from . import ai_resource_updates as ai_updates
 from . import binary_adoption
+from . import installed_managers
 
 NPM = {"codex": "@openai/codex", "claude": "@anthropic-ai/claude-code",
        "copilot": "@github/copilot", "opencode": "opencode-ai",
@@ -46,13 +48,14 @@ class Resource:
     can_update: bool = False
     ownership: str = "Unverified"
     can_adopt: bool = False
+    update_command: tuple[str, ...] = ()
 
     @property
     def status(self):
         if self.installation != "Installed":
             return self.installation
         if self.update == "Available":
-            return "Update available" if self.can_update else "Manual update"
+            return "Update available" if self.can_update or self.can_adopt else "Update blocked"
         if self.update == "Current":
             return "Installed"
         if self.update == "Failed":
@@ -63,9 +66,13 @@ class Resource:
     def action(self):
         if self.installation in ("Missing", "Partial", "Disabled"):
             return "Install" if self.installation == "Missing" else "Configure"
-        if self.installation == "Installed" and self.update == "Available" and self.can_update:
+        if self.installation == "Installed" and self.update != "Checking" and (self.can_update or self.can_adopt):
             return "Update"
         return ""
+
+    @property
+    def bulk_update(self):
+        return self.action == "Update" and self.update in ("Available", "Unknown", "Failed")
 
 
 def command(*argv, timeout=5):
@@ -134,36 +141,22 @@ def local_rows(scope):
                  for group, keys in GROUPS for key in keys if key not in EXTENSIONS)
 
 
-def npm_owned(key, path):
-    package = NPM[key]
-    prefix = Path.home() / ".local"
-    package_root = prefix / "lib/node_modules" / package
-    try:
-        data = json.loads((package_root / "package.json").read_text())
-        binary = Path(path)
-        if not binary.is_symlink() or binary != prefix / "bin" / ("skills" if key == "skills-cli" else key):
-            return ""
-        if not binary.resolve().is_relative_to(package_root.resolve()) or data.get("name") != package:
-            return ""
-        if key == "skills-cli":
-            receipt = Path.home() / ".local/state/devbox-bootstrap/managed/skills-cli"
-            if receipt.read_text().strip() != str(binary):
-                return ""
-        return version(str(data.get("version", "")))
-    except (OSError, ValueError, TypeError):
-        return ""
+def manager_args(row, route):
+    return ("bash", str(ROOT / "utils/installed-update.sh"), sys.executable,
+            row.key, row.path, route.kind, route.prefix) if route else ()
 
 
 def npm_probe(row):
-    installed = npm_owned(row.key, row.path)
-    owned = bool(installed)
-    # Read the active CLI version even when Devbox cannot establish ownership.
-    installed = installed or (version(command(row.path, "--version")) if row.path else "")
+    route = installed_managers.detect(row.key, row.path)
+    installed = (route.version if route else "") or (version(command(row.path, "--version")) if row.path else "")
     candidate = version(command("npm", "view", NPM[row.key], "version", "--fetch-retries=0", "--fetch-timeout=5000", timeout=7))
-    return replace(row, manager="npm (user-local)" if owned else "External CLI / manager unverified",
-                   ownership="Verified" if owned else "Unverified", installed_version=installed,
+    return replace(row, manager=route.label if route else "Manager unrecognized",
+                   ownership="Verified" if route else "Unverified", installed_version=installed,
                    available_version=candidate, update=newer(installed, candidate) if candidate else "Failed",
-                   can_update=owned, evidence="Official npm package version; external CLI must be updated by its original manager." if not owned else ("npm registry query failed." if not candidate else "Verified user-local npm package."))
+                   can_update=bool(route), update_command=manager_args(row, route),
+                   evidence=("Update through original manager; revalidated before execution." if route else
+                             "Installed, but no supported writable update provider; active executable preserved.")
+                   + (" Upstream query failed; verified providers can retry." if not candidate else ""))
 
 
 def package_owner(path, packages):
@@ -280,9 +273,13 @@ def release_probe(row):
         evidence += " Upstream version query failed or returned invalid metadata."
     if not installed:
         evidence += " Installed version could not be parsed."
-    return replace(row, manager="Standalone", installed_version=installed, available_version=candidate,
-                   update=newer(installed, candidate) if candidate else "Failed", can_update=owned,
-                   ownership="Verified" if owned else "Unmanaged", can_adopt=adopt, evidence=evidence)
+    route = installed_managers.detect(key, row.path) if key in ("uv", "rtk") and not owned else None
+    if route:
+        evidence = "Update through " + route.label + "; revalidated before execution."
+    return replace(row, manager=route.label if route else "Standalone", installed_version=installed, available_version=candidate,
+                   update=newer(installed, candidate) if candidate else "Failed", can_update=owned or bool(route),
+                   ownership="Verified" if owned or route else "Unmanaged", can_adopt=adopt, evidence=evidence,
+                   update_command=manager_args(row, route))
 
 
 def git_checkout(path, repo):
@@ -387,7 +384,8 @@ def scan(scope, rows):
                 if row.key in ("rtk", "ponytail"):
                     statuses = tuple(f"{a.name}: {getattr(a, row.key).state} — {getattr(a, row.key).reason}" for a in matrix.agents)
                     state = getattr(codex, row.key).state if codex else "Unavailable"
-                    if row.key == "rtk" and matrix.binary.state != "Installed":
+                    if row.key == "rtk":
+                        # Binary lifecycle is independent of per-agent hook configuration.
                         state = matrix.binary.state
                     if state == "Unavailable":
                         state = "Missing" if not codex or codex.cli == "Unavailable" else "Unverified"
@@ -441,6 +439,12 @@ def plan(scope, rows, keys):
         verb = row.action
         if not verb:
             result.append(Operation("Skip", row.key, row.name))
+        elif verb == "Update" and row.update_command:
+            result.append(Operation(verb, row.key, row.name, row.update_command))
+        elif verb == "Update" and row.can_adopt and not row.can_update:
+            adopt = ("bash", str(ROOT / "utils/adopt-binary.sh"), sys.executable, row.key, row.installed_version)
+            args = ("bash", "-c", shlex.join(adopt) + " && " + shlex.join(build_command("upgrade", [row.key])))
+            result.append(Operation(verb, row.key, row.name + " (verify/adopt first)", args))
         elif scope == "development":
             args = build_command("upgrade" if verb == "Update" else "install", [row.key])
             result.append(Operation(verb, row.key, row.name, tuple(args)))

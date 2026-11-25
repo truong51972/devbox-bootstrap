@@ -42,9 +42,10 @@ class ResourceManagerTests(unittest.TestCase):
         self.assertEqual(newer("2.0.0", "1.0.0"), "Current")
         self.assertEqual(newer("1.0.0", ""), "Unknown")
 
-    def test_unknown_is_not_updateable(self):
+    def test_unknown_can_retry_verified_provider(self):
         row = Resource("uv", "uv", "TOOLS", True, "Installed", update="Unknown", can_update=True)
-        self.assertEqual(row.action, "")
+        self.assertEqual(row.action, "Update")
+        self.assertTrue(row.bulk_update)
         self.assertEqual(row.status, "Update unknown")
 
 
