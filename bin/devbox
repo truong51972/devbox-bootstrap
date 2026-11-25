@@ -4,6 +4,7 @@ set -Eeuo pipefail
 script="$(readlink -f -- "${BASH_SOURCE[0]}")"
 root="$(cd -- "$(dirname -- "$script")/.." && pwd)"
 venv="$root/.venv"
+export DEVBOX_INVOCATION_CWD="${DEVBOX_INVOCATION_CWD:-$PWD}"
 upstream='https://github.com/truong51972/devbox-bootstrap.git'
 # shellcheck source=utils/operation-lock.sh
 source "$root/utils/operation-lock.sh"
@@ -160,6 +161,8 @@ Usage: devbox [OPTION]
   --preflight      Inspect host environment
   --upgrade ...    Upgrade installed tools (not Devbox source code)
   --only ...       Install the selected tools
+  actions          List convenience toolkit actions
+  net/sys/docker/storage/agent/env/project/util/health/run  Toolkit subcommands
   --help           Show this help
 HELP
         ;;
@@ -192,6 +195,12 @@ HELP
             exec "$venv/bin/python" -m tui.cleaner "$@"
         fi
         exec python3 -m tui.cleaner "$@" ;;
+    actions|net|sys|docker|storage|agent|env|project|util|health|doctor|run)
+        cd "$root"
+        if [[ -x "$venv/bin/python" ]]; then
+            exec "$venv/bin/python" -m tui.toolkit.cli "$@"
+        fi
+        exec python3 -m tui.toolkit.cli "$@" ;;
     --doctor|--preflight|--upgrade|--dry-run|--only|--kubectl-version)
         exec bash "$root/setup-ubuntu.sh" "$@" ;;
     *)

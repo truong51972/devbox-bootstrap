@@ -60,7 +60,7 @@ class ContractTests(unittest.TestCase):
     def test_no_subprocess_during_construction_or_redraw(self):
         with patch("subprocess.run", side_effect=AssertionError("blocking subprocess")):
             app = DevboxTUI()
-            app.open_menu()
+            app.open_menu("install")
             for _ in range(40):
                 app.selector.move(1)
                 app._component_details()

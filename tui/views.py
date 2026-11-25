@@ -36,7 +36,7 @@ class DevboxViews:
 
     def _page(self, title: str, body, shortcut: str):
         compact = {
-            "Main menu": "↑↓ Move  Enter Open  t Theme  ? Help  q Quit",
+            "Overview": "↑↓ Move  Enter Open  Ctrl+K Search  q Quit",
             "Components": "↑↓ Move  Space Toggle  / Filter  i Info  r Refresh  Enter Next",
             "Cleaner": "Space Toggle  a Safe  / Filter  i Info  r Scan  Enter Next  Esc",
             "Confirm": "Space Options  d Dry-run  Enter Run  Esc Back",
@@ -49,7 +49,7 @@ class DevboxViews:
         }
         def header_text():
             width = max(0, self.columns() - 2)
-            suffix = "     Ubuntu / WSL" if width >= 75 else ""
+            suffix = "     Developer Toolkit" if width >= 75 else ""
             value = self._truncate(
                 f"  DEVBOX / {title.upper()}{suffix}", width
             )
@@ -76,9 +76,9 @@ class DevboxViews:
 
     def _build_views(self) -> None:
         self.views["home"] = self._page(
-            "Main menu",
+            "Overview",
             DynamicContainer(self._home_layout),
-            "↑↓/j/k Navigate   Enter Open   t Theme   ? Help   q Quit",
+            "↑↓ Navigate   Enter Open   Ctrl+K Search   t Theme   ? Help   q Quit",
         )
         self.views["update_prompt"] = self._page(
             "Update available", HSplit([

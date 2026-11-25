@@ -36,6 +36,8 @@ from tui.semantic import SemanticLexer, FragmentLexer, log_fragments, count_frag
 from tui.update_check import UpdateCheck, check_update
 from tui.views import DevboxViews, WIDE_LAYOUT_MIN, SPLIT_SPACING, detail_panel_width
 from tui.tasks import BackgroundTasks
+from tui.toolkit.screens import ToolkitScreens
+import platform
 from tui.reporting import RunReport, read_report, write_report, summarize_status, status_lines
 from tui.execution import prepare_run, run_env, launch, wait_for_run
 from tui.inventory_detail import inspect_components
@@ -45,19 +47,28 @@ from tui.cleaner import (BY_KEY as CLEANER_ITEMS, SAFE_KEYS, PROBE_GROUPS,
 FINISHED_STATES = FINAL_STATES
 # Stable width across Home, Components and History; remaining columns go to the list.
 MENU = (
-    ("install", "Install components"),
-    ("upgrade", "Upgrade components"),
-    ("doctor", "Doctor - check configuration"),
-    ("preflight", "Preflight - inspect host"),
-    ("clean", "Cleaner - reclaim disk space"),
-    ("update", "Update Devbox source"),
-    ("logs", "Logs and history"),
+    ("quick", "Quick Actions"),
+    ("favorites", "Favorites"),
+    ("environment", "Development Tools"),
+    ("agents", "Coding Agents"),
+    ("network", "Networking"),
+    ("system", "System Utilities"),
+    ("containers", "Containers"),
+    ("storage", "Storage & Cleaner"),
+    ("project", "Project & Workflows"),
+    ("utilities", "Data & Text Utilities"),
+    ("health", "System Health"),
+    ("logs", "Activity"),
+    ("settings", "Settings & Update"),
     ("exit", "Exit"),
 )
 MENU_GROUPS = {
-    "install": "SETUP", "upgrade": "SETUP", "doctor": "SYSTEM",
-    "preflight": "SYSTEM", "clean": "MAINTENANCE", "update": "MAINTENANCE", "logs": "MAINTENANCE",
-    "exit": "MAINTENANCE",
+    "quick": "QUICK ACCESS", "favorites": "QUICK ACCESS",
+    "environment": "MANAGE", "agents": "MANAGE",
+    "network": "INSPECT & OPERATE", "system": "INSPECT & OPERATE",
+    "containers": "INSPECT & OPERATE", "storage": "INSPECT & OPERATE",
+    "project": "INSPECT & OPERATE", "utilities": "INSPECT & OPERATE",
+    "health": "DEVBOX", "logs": "DEVBOX", "settings": "DEVBOX", "exit": "DEVBOX",
 }
 MENU_DETAILS = {
     "install": "Choose development tools and install only what you need.",
@@ -67,6 +78,19 @@ MENU_DETAILS = {
     "clean": "Scan developer caches. All selects safe items only; manual items require consent.",
     "update": "Fast-forward Devbox source, then exit on success.",
     "logs": "Review past operations and their complete terminal output.",
+    "quick": "Search all local developer actions.",
+    "favorites": "Open your saved read-only actions.",
+    "environment": "Inspect tools, ownership and desired-state profiles.",
+    "agents": "Inspect agent CLIs, integrations and skills.",
+    "network": "Ports, IP, DNS, connectivity and TLS.",
+    "system": "Processes, GPU, services, PATH and SSH.",
+    "containers": "Inspect and operate local Docker containers.",
+    "storage": "Inspect filesystem usage and developer caches.",
+    "project": "Discover the invocation directory and Git context.",
+    "utilities": "Local text, encoding, IDs and checksums.",
+    "workflows": "Preview and launch explicitly approved commands.",
+    "health": "Structured diagnostics, Doctor and host preflight.",
+    "settings": "Theme, self-update and preferences.",
     "exit": "Leave Devbox without modifying the system.",
 }
 DESCRIPTIONS = {
@@ -86,6 +110,10 @@ DESCRIPTIONS = {
     "rtk": "Compresses command output to save tokens.",
     "skills-cli": "Vercel Skills CLI; requires Node.js >= 22.20 and npm.",
     "ponytail": "Coding-agent plugin for concise workflows.",
+    "tmux": "Persistent terminal sessions.",
+    "btop": "Interactive resource monitor.",
+    "gh": "GitHub command-line interface.",
+    "jq": "Command-line JSON processing.",
 }
 WARNINGS = {
     "docker": "Docker group access grants root-equivalent privileges.",
@@ -114,6 +142,8 @@ HELP = """NAVIGATION
   Enter              Open selection or continue
   Esc                Back / close search / return
   ?                  Keyboard help
+  Ctrl+K             Search developer actions
+  Ctrl+S             Submit toolkit input
 
 COMPONENT SELECTION
   Space              Toggle highlighted component
@@ -141,7 +171,7 @@ Full logs are under ~/.local/state/devbox-bootstrap/logs.
 """
 
 
-class DevboxTUI(DevboxViews):
+class DevboxTUI(ToolkitScreens, DevboxViews):
     def __init__(self) -> None:
         self.tasks = BackgroundTasks()
         self.run_report: RunReport | None = None
@@ -246,8 +276,10 @@ class DevboxTUI(DevboxViews):
         self._bind_text(self.confirm_plan)
         self._bind_filter()
 
+        self.init_toolkit()
         self.views: dict[str, object] = {}
         self._build_views()
+        self.build_toolkit_views()
 
         self.app = Application(
             layout=Layout(
@@ -713,7 +745,11 @@ class DevboxTUI(DevboxViews):
             ("class:section", "  SELECTED ACTION\n\n"),
             ("class:title", "  " + item.label + "\n\n"),
             ("class:body", "  " + item.description + "\n\n"),
-            ("class:muted", "  Enter to continue"),
+            ("class:section", "  ENVIRONMENT\n"),
+            ("class:body", f"  {platform.system()} · {platform.machine()}\n"),
+            ("class:body", f"  {sum(v == 'Installed' for v in self.available.values())} tools detected\n"),
+            ("class:body", f"  {sum(v != 'Unavailable' for v in self.ponytail_agents.values())} agent CLIs detected\n"),
+            ("class:muted", "  Ctrl+K Search all actions · Enter Open"),
         ]
 
     def _component_details(self, *, full: bool = False):
@@ -889,6 +925,8 @@ class DevboxTUI(DevboxViews):
         self._invalidate()
 
     def _active_list(self) -> KeyboardList:
+        if self.screen == "toolkit":
+            return self.toolkit_list
         if self.screen == "logs":
             return self.log_files
         if self.screen == "cleaner":
@@ -931,6 +969,11 @@ class DevboxTUI(DevboxViews):
 
     def _bind_text(self, widget, *, result=False, log_viewer=False) -> None:
         kb = KeyBindings()
+
+        @kb.add("c-k", filter=Condition(lambda: not self.busy and self.screen in ("home", "toolkit") and not self.filter_active), eager=True)
+        def _quick(_event):
+            self.open_toolkit()
+            self._begin_filter()
 
         @kb.add("escape")
         def _back(_event):
@@ -1046,10 +1089,16 @@ class DevboxTUI(DevboxViews):
         self.app.style = Style.from_dict(THEMES[self.theme])
         self._notice(f"Theme: {self.theme}. Set DEVBOX_THEME={self.theme} to keep it on launch.")
 
-    def open_menu(self) -> None:
-        action = self.menu.current_value
+    def open_menu(self, action=None) -> None:
+        action = action or self.menu.current_value
         if action == "exit":
             self.quit()
+        elif action in ("quick", "favorites", "environment", "agents", "network", "system", "containers", "storage", "project", "utilities", "workflows", "health", "settings"):
+            categories = {"quick": None, "favorites": "Favorites", "environment": "Environment",
+                          "agents": "Coding Agents", "network": "Networking", "system": "System",
+                          "containers": "Containers", "storage": "Storage", "project": "Project",
+                          "utilities": "Utilities", "workflows": "Workflows", "health": "Health", "settings": "Settings"}
+            self.open_toolkit(categories[action])
         elif action in ("install", "upgrade"):
             self.action = action
             self.available = inventory(self.ponytail_agents, quick=True)
@@ -1421,6 +1470,9 @@ class DevboxTUI(DevboxViews):
         if self.busy:
             self._notice("A task is running; leaving would orphan the installer.")
             return
+        if self.screen.startswith("toolkit"):
+            self.toolkit_back()
+            return
         if self.screen == "help":
             target = self.help_return_screen
             self.navigate(target, self._focus_for(target))
@@ -1455,6 +1507,8 @@ class DevboxTUI(DevboxViews):
     def _focus_for(self, screen: str):
         return {
             "home": self.menu.window, "select": self.selector.window,
+            "toolkit": self.toolkit_list.window, "toolkit_input": self.toolkit_input,
+            "toolkit_result": self.toolkit_result, "toolkit_confirm": self.toolkit_confirm.window,
             "update_prompt": self.update_choices.window,
             "cleaner": self.cleaner_list.window,
             "confirm": self._confirm_focus(), "result": self.results_view,
@@ -1463,7 +1517,7 @@ class DevboxTUI(DevboxViews):
         }.get(screen, self.help_view)
 
     def quit(self) -> None:
-        if self.busy:
+        if self.busy or self.toolkit_running():
             self._notice("Finish the running task before exiting.")
             return
         self._cancel_cleaner_scan()

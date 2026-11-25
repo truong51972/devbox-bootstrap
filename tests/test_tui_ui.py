@@ -72,7 +72,7 @@ class LayoutTests(unittest.TestCase):
         # Exercise prompt_toolkit's actual column allocator, not only the
         # declared Window dimension. Long details must never move the divider.
         app = DevboxTUI()
-        app.open_menu()
+        app.open_menu("install")
         for columns in (94, 95, 120, 160, 200):
             app.columns = lambda c=columns: c
             app.rows = lambda: 35
@@ -143,7 +143,7 @@ class LayoutTests(unittest.TestCase):
 
     def test_component_groups_appear_once_and_are_contiguous(self):
         app = DevboxTUI()
-        app.open_menu()
+        app.open_menu("install")
         category_order = [entry.group for entry in app.selector.entries]
         self.assertEqual(
             [group for group in dict.fromkeys(category_order)],
@@ -178,7 +178,7 @@ class LayoutTests(unittest.TestCase):
     def test_status_aligns_to_list_pane_not_terminal(self):
         app = DevboxTUI()
         app.columns = lambda: 120
-        app.open_menu()
+        app.open_menu("install")
         self.assertEqual(app.selector.get_columns(), 58)
         # Every displayed state begins at the same column, including focused
         # rows and entries with widely differing label lengths.
@@ -195,7 +195,7 @@ class LayoutTests(unittest.TestCase):
     def test_details_show_real_selection_and_inventory(self):
         app = DevboxTUI()
         app.columns = lambda: 120
-        app.open_menu()
+        app.open_menu("install")
         app.selector.current_values = ["uv", "rtk"]
         app.selector.set_query("rtk")
         preview = "".join(text for _, text in app._component_details())
@@ -205,13 +205,13 @@ class LayoutTests(unittest.TestCase):
         self.assertIn("OVERVIEW", details)
         self.assertIn("DESCRIPTION", details)
         self.assertIn("INVENTORY", details)
-        self.assertIn("2 / 16 selected", details)
+        self.assertIn(f"2 / {len(ORDER)} selected", details)
         self.assertIn("Selected: Yes", details)
         self.assertIn("QUICK ACTIONS", details)
 
     def test_visual_focus_differs_from_selected_items(self):
         app = DevboxTUI()
-        app.open_menu()
+        app.open_menu("install")
         app.selector.current_values = ["zsh"]
         content = app.selector.render()
         text = "".join(fragment for _style, fragment in content)
@@ -227,7 +227,7 @@ class LayoutTests(unittest.TestCase):
 
     def test_component_description_and_warnings_available(self):
         app = DevboxTUI()
-        app.open_menu()
+        app.open_menu("install")
         app.selector.set_query("nvidia")
         current = app.selector.current
         self.assertEqual(current.key, "nvidia")
@@ -237,7 +237,7 @@ class LayoutTests(unittest.TestCase):
 
     def test_filter_clears_and_retains_order(self):
         app = DevboxTUI()
-        app.open_menu()
+        app.open_menu("install")
         app.selector.set_query("pythON")
         self.assertEqual([x.key for x in app.selector.visible], ["uv"])
         app.selector.toggle()
@@ -296,7 +296,7 @@ class LayoutTests(unittest.TestCase):
                     task = asyncio.create_task(app.app.run_async())
                     try:
                         await asyncio.sleep(0.10)
-                        pipe.send_text("\r")
+                        pipe.send_text("jj\r\r")
                         await asyncio.sleep(0.10)
                         app.selector.current_values = ["uv"]
                         app.selector.set_query("Docker Engine")
@@ -326,7 +326,7 @@ class LayoutTests(unittest.TestCase):
                     task = asyncio.create_task(app.app.run_async())
                     try:
                         await asyncio.sleep(0.10)
-                        pipe.send_text("\r")
+                        pipe.send_text("jj\r\r")
                         await asyncio.sleep(0.10)
                         app.selector.current_values = ["zsh", "docker", "keychain"]
                         pipe.send_text("\r")
@@ -360,7 +360,7 @@ class LayoutTests(unittest.TestCase):
                     task = asyncio.create_task(app.app.run_async())
                     try:
                         await asyncio.sleep(0.1)
-                        pipe.send_text("\r")
+                        pipe.send_text("jj\r\r")
                         await asyncio.sleep(0.1)
                         app.selector.current_values = ["fzf"]
                         pipe.send_text("\r")
@@ -388,8 +388,7 @@ class LayoutTests(unittest.TestCase):
     def test_update_confirmation_has_no_preview_option(self):
         app = DevboxTUI()
         app.dry_run = True
-        app.menu.index = next(i for i, entry in enumerate(app.menu.entries) if entry.key == "update")
-        app.open_menu()
+        app.open_menu("update")
         self.assertFalse(app.dry_run)
         self.assertIn("Enter Update", app._confirm_shortcuts())
         self.assertNotIn("d Dry-run", app._confirm_shortcuts())
@@ -466,7 +465,7 @@ class LayoutTests(unittest.TestCase):
         self.assertIs(logs, app._logs_layout())
         self.assertIs(run, app._run_layout())
 
-        app.open_menu()
+        app.open_menu("install")
         refreshed_selection = app._selection_layout()
         self.assertIsNot(selection, refreshed_selection)
         self.assertIs(refreshed_selection.children[0], app.selector.window)
@@ -494,7 +493,7 @@ class LayoutTests(unittest.TestCase):
                     task = asyncio.create_task(app.app.run_async())
                     try:
                         await asyncio.sleep(0.10)
-                        pipe.send_text("\r")
+                        pipe.send_text("jj\r\r")
                         await asyncio.sleep(0.10)
                         self.assertEqual(app.screen, "select")
                         self.assertIsInstance(app._selection_layout(), Window)

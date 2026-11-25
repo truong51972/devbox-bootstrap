@@ -26,10 +26,14 @@ COMPONENTS = (
     ("rtk", "RTK (token optimizer)"),
     ("skills-cli", "Skills CLI"),
     ("ponytail", "Ponytail (agent plugin)"),
+    ("tmux", "tmux"),
+    ("btop", "btop"),
+    ("gh", "GitHub CLI"),
+    ("jq", "jq"),
 )
 GROUPS = (
     ("SHELL", ("zsh", "powerlevel10k", "keychain")),
-    ("DEVELOPER TOOLS", ("uv", "zoxide", "fzf", "ripgrep", "bat-fd", "direnv")),
+    ("DEVELOPER TOOLS", ("uv", "zoxide", "fzf", "ripgrep", "bat-fd", "direnv", "tmux", "btop", "gh", "jq")),
     ("CONTAINERS", ("docker", "nvidia")),
     ("KUBERNETES", ("kubectl", "minikube")),
     ("AI AGENT EXTENSIONS", ("rtk", "skills-cli", "ponytail")),
@@ -42,6 +46,7 @@ BINS = {
     "nvidia": ("nvidia-ctk",), "kubectl": ("kubectl",),
     "minikube": ("minikube",), "direnv": ("direnv",),
     "rtk": ("rtk",), "skills-cli": ("skills",),
+    "tmux": ("tmux",), "btop": ("btop",), "gh": ("gh",), "jq": ("jq",),
 }
 ORDER = tuple(code for code, _ in COMPONENTS)
 

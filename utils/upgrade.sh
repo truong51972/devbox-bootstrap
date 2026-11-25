@@ -381,6 +381,7 @@ upgrade_component() {
                 UPGRADE_BLOCKED=1
                 warn 'Ponytail is managed by each agent. Update it using that agent plugin manager.'
             fi ;;
+        tmux|btop|gh|jq) upgrade_apt "$component" ;;
         clean)
             log 'APT housekeeping is not an upgradeable tool.'
             ;;
@@ -410,7 +411,7 @@ upgrade_main() {
     if (( BOOTSTRAP_DRY_RUN )); then
         log '[dry-run] No package lists, downloads or files will be changed.'
     fi
-    for component in zsh powerlevel10k uv keychain zoxide fzf ripgrep bat-fd docker nvidia kubectl minikube direnv rtk skills-cli ponytail; do
+    for component in zsh powerlevel10k uv keychain zoxide fzf ripgrep bat-fd docker nvidia kubectl minikube direnv rtk skills-cli ponytail tmux btop gh jq; do
         if [[ -n "$ONLY_COMPONENTS" && ",$ONLY_COMPONENTS," != *",$component,"* ]]; then
             continue
         fi

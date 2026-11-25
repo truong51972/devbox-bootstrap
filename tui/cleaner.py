@@ -156,7 +156,12 @@ def size(path):
 
 
 def human(value):
-    return f"{value / (1024 ** 2):,.1f} MiB"
+    # Adaptive units make small caches and large model footprints readable.
+    amount = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(amount) < 1024 or unit == "TiB":
+            return f"{amount:,.1f} {unit}"
+        amount /= 1024
 
 
 def old_logs():
