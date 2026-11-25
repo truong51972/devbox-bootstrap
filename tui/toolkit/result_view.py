@@ -1,0 +1,120 @@
+"""Reusable result table and semantic report rendering."""
+from prompt_toolkit.data_structures import Point
+from prompt_toolkit.utils import get_cwidth
+from tui.ui import Entry, KeyboardList
+from .native import safe_text
+from .results import TableData, ReportData, ResourceData, TextData
+
+def fit_cell(value, width):
+    text = safe_text(value).replace("\n", " ").replace("\t", " ")
+    if width <= 0:
+        return ""
+    if get_cwidth(text) > width:
+        kept = []
+        used = 0
+        for char in text:
+            size = get_cwidth(char)
+            if used + size > width - 1:
+                break
+            kept.append(char)
+            used += size
+        text = "".join(kept) + "…"
+    return text + " " * max(0, width - get_cwidth(text))
+
+
+class ResultTable(KeyboardList):
+    def __init__(self, *args, **kwargs):
+        self.data = TableData((), ())
+        self.sort_column = -1
+        self.descending = False
+        super().__init__(*args, **kwargs)
+
+    def set_data(self, data, preserve=False):
+        previous, query, sort = self.row, self.query, self.sort_column
+        self.data = data
+        self.entries = [Entry(str(i), " ".join(c.value for c in row)) for i, row in enumerate(data.rows)]
+        self.query = query if preserve else ""
+        self.sort_column = -1
+        if preserve and 0 <= sort < len(data.columns):
+            self.sort_by(sort)
+        self.index = next((i for i, e in enumerate(self.visible) if preserve and data.rows[int(e.key)] == previous), 0)
+        self.on_change()
+
+    @property
+    def row(self):
+        return self.data.rows[int(self.current_value)] if self.current_value is not None else None
+
+    def sort_next(self):
+        if not self.data.columns:
+            return
+        self.sort_by((self.sort_column + 1) % len(self.data.columns))
+
+    def sort_by(self, column):
+        self.sort_column = column
+        def key(entry):
+            row = self.data.rows[int(entry.key)]
+            value = row[self.sort_column].value.casefold() if self.sort_column < len(row) else ""
+            try:
+                return (0, float(value))
+            except ValueError:
+                return (1, value)
+        self.entries.sort(key=key)
+        self.index = 0
+        self.on_change()
+
+    def cursor_position(self):
+        return Point(x=0, y=self.index + 1 if self.visible else 0)
+
+    def render(self):
+        if not self.visible:
+            return [("class:muted", "  No matching rows. Refresh or change the filter.")]
+        width = max(1, self.get_columns() - 2)
+        if width < 8:
+            return [("class:muted", fit_cell("Resize", width))]
+        n = len(self.data.columns)
+        if not n:
+            return []
+        # Hide trailing columns only on very narrow panes; details expose all fields.
+        count = min(n, max(1, width // 9))
+        available = max(count, width - 2 - (count - 1))
+        weights = [max(7, min(22, len(c) + 3)) for c in self.data.columns[:count]]
+        widths = [max(1, available * w // sum(weights)) for w in weights]
+        widths[-1] += available - sum(widths)
+        out = [("class:section", "  " + " ".join(fit_cell(c, w) for c, w in zip(self.data.columns, widths)) + "\n")]
+        for i, e in enumerate(self.visible):
+            active = i == self.index
+            out.append(("class:focus" if active else "class:body", "> " if active else "  "))
+            row = self.data.rows[int(e.key)]
+            for c, w in zip(row, widths):
+                style = "class:" + c.tone
+                if active:
+                    style = "class:focus" if c.tone in ("body", "muted") else "class:focus " + style
+                out.append((style, fit_cell(c.value, w) + " "))
+            out.append(("", "\n"))
+        return out
+
+    def detail(self):
+        return [fragment for label, cell in zip(self.data.columns, self.row or ())
+                for fragment in (("class:section", "  " + label + "\n"), ("class:" + cell.tone, "  " + safe_text(cell.value) + "\n\n"))]
+
+def fragments(result, width=80):
+    out = [("class:" + result.tone, "  " + safe_text(result.summary) + "\n\n")]
+    if isinstance(result.data, ReportData):
+        for name, c in result.data.fields:
+            out.extend((("class:section", "  " + name + "\n"), ("class:" + c.tone, "  " + safe_text(c.value) + "\n\n")))
+    elif isinstance(result.data, ResourceData):
+        for metric in result.data.metrics:
+            out.extend((("class:section", "  " + metric.name + "\n"), ("class:body", "  " + metric.value + "\n")))
+            if metric.ratio is not None:
+                ratio = min(1., max(0., metric.ratio))
+                count = min(30, max(5, width - 12))
+                filled = round(count * ratio)
+                out.append(("class:warning" if ratio >= .85 else "class:installed", "  " + "█" * filled + "░" * (count-filled) + f" {ratio:.0%}\n"))
+            out.append(("", "\n"))
+    elif isinstance(result.data, TextData):
+        out.append(("class:body", safe_text(result.data.text) + "\n"))
+    for note in result.notes:
+        out.append(("class:muted", "\n  " + safe_text(note)))
+    if result.partial:
+        out.append(("class:warning", "\n  Partial results — scan/output limit reached."))
+    return out

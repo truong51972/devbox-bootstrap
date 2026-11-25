@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from . import agents, data, network, system, environment, health
+from .guidance import GUIDES, Guide
 
 @dataclass(frozen=True)
 class Action:
@@ -17,6 +18,10 @@ class Action:
     required: bool = False
     sensitive: bool = False
     mode: str = "query"
+
+    @property
+    def guide(self) -> Guide:
+        return GUIDES[self.id]
 
 
 ACTIONS = (

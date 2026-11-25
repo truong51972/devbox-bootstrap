@@ -34,7 +34,7 @@ class DevboxViews:
             message[:max(0, width - 1)] + "…"
         )
 
-    def _page(self, title: str, body, shortcut: str):
+    def _page(self, title, body, shortcut):
         compact = {
             "Overview": "↑↓ Move  Enter Open  Ctrl+K Search  q Quit",
             "Components": "↑↓ Move  Space Toggle  / Filter  i Info  r Refresh  Enter Next",
@@ -49,9 +49,9 @@ class DevboxViews:
         }
         def header_text():
             width = max(0, self.columns() - 2)
-            suffix = "     Developer Toolkit" if width >= 75 else ""
+            name = title() if callable(title) else title
             value = self._truncate(
-                f"  DEVBOX / {title.upper()}{suffix}", width
+                f"  DEVBOX / {name.upper()}", width
             )
             return [("class:header", value)]
 
@@ -62,8 +62,15 @@ class DevboxViews:
 
         def footer_text():
             width = max(0, self.columns() - 2)
-            value = (self._confirm_shortcuts() if title == "Confirm" else
-                     compact.get(title, shortcut) if width < 85 else shortcut)
+            name = title() if callable(title) else title
+            hints = shortcut() if callable(shortcut) else shortcut
+            value = (self._confirm_shortcuts() if name == "Confirm" else
+                     compact.get(name, hints) if width < 85 else hints)
+            if "? Help" not in value and "F1 Help" not in value and name != "Keyboard help":
+                value += "   ? Help"
+            if len(value) > width:
+                tail = "   F1 Help   Esc"
+                value = self._truncate(value, max(0, width - len(tail) - 2)) + tail
             return [("class:footer", self._truncate("  " + value, width))]
 
         return HSplit([

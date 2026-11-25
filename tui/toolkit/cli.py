@@ -8,6 +8,7 @@ import shlex
 import sys
 
 from .registry import ACTIONS, BY_ID, execute
+from .guidance import guide_for, command_example
 from .operations import prepare, apply
 from .workflows import list_workflows, run
 
@@ -55,6 +56,20 @@ def main(argv=None):
             print("\nManaged: sys terminate PID, docker start|stop|restart CONTAINER (preview unless --yes)")
             print("Other: env install|upgrade, agent integrate, storage scan|clean, health doctor|preflight, run [ID] [--yes]")
             return 0
+        if len(argv) >= 2 and argv[-1] in ("--help", "-h"):
+            key = ".".join(argv[:-1])
+            key = ALIASES.get(key, key)
+            guide = guide_for(key)
+            if guide:
+                print(f"{key}: {guide.use}\n\nExample: {command_example(key, guide)}\nResult: {guide.result}\nLimitations: {guide.limit}")
+                return 0
+            if len(argv) == 2:
+                prefix = argv[0] + "."
+                matches = [action for action in ACTIONS if action.id.startswith(prefix)]
+                if matches:
+                    for action in matches:
+                        print(command_example(action.id, action.guide), "—", action.description)
+                    return 0
         legacy(argv)
         if argv[:2] == ["agent", "integrate"]:
             from tui.agent_status import AGENTS
