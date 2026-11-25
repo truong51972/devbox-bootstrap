@@ -47,7 +47,6 @@ LEGACY_ENTRIES = (
     ("clean", "Cleaner", "Storage", "Scan caches and review safe or manual cleanup."),
     ("doctor", "Doctor", "Health", "Run existing read-only health checks."),
     ("preflight", "Host preflight", "Health", "Inspect host prerequisites."),
-    ("update", "Update Devbox source", "Settings", "Fast-forward Devbox and exit on success."),
     ("theme", "Toggle theme", "Settings", "Switch between color and monochrome."),
     ("logs", "Activity / history", "Activity", "Inspect previous managed operations."),
 )
@@ -308,6 +307,7 @@ class ToolkitScreens(ToolkitUX, ResourceScreens):
             rows = [r for r in rows if r.group not in ("Environment", "Coding Agents")]
             rows += [Entry("workspace:environment", "Development Tools", "Manage", description="Install, update and inspect tools"),
                      Entry("workspace:agents", "AI Agents", "Manage", description="Install, update and configure AI agents"),
+                     Entry("workspace:update", "Update Devbox source", "Devbox", description="Fast-forward Devbox and exit on success."),
                      Entry("workspace:favorites", "Favorites", "Quick access", description="Saved actions")]
         for a in ACTIONS:
             if self.toolkit_category not in (None, "Favorites", a.category):

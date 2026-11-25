@@ -110,6 +110,24 @@ class StartupUpdateTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(next(e.status for e in app.menu.entries if e.key == "update"), "Up to date")
         await app.tasks.close()
 
+    async def test_source_update_is_not_duplicated_in_settings(self):
+        app = DevboxTUI()
+        app.open_menu("settings")
+        self.assertEqual(app.screen, "toolkit")
+        self.assertIn("legacy:theme", [entry.key for entry in app.toolkit_list.entries])
+        self.assertFalse(any(entry.label == "Update Devbox source" for entry in app.toolkit_list.entries))
+        self.assertEqual(sum(entry.key == "update" for entry in app.menu.entries), 1)
+        app.open_toolkit()
+        updates = [entry for entry in app.toolkit_list.entries if entry.label == "Update Devbox source"]
+        self.assertEqual([entry.key for entry in updates], ["workspace:update"])
+        app.toolkit_list.set_query("Update Devbox source")
+        app.toolkit_list.index = next(i for i, entry in enumerate(app.toolkit_list.visible) if entry.key == "workspace:update")
+        app.toolkit_open_action()
+        self.assertEqual(app.screen, "confirm")
+        self.assertEqual(app.action, "update")
+        self.assertFalse(app.busy)
+        await app.tasks.close()
+
     async def test_update_exits_only_on_success(self):
         from prompt_toolkit.application.current import create_app_session
         from prompt_toolkit.input import create_pipe_input
