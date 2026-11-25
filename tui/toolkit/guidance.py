@@ -564,6 +564,7 @@ GUIDES.update({
        for verb in ("start", "stop", "restart")},
 })
 GUIDES.update({
+    "legacy:ai-setup": Guide("Setup", "none", "", "Install the Codex-first AI toolkit and selected Coding Kit skills.", "A preview of exact selected tools and skills.", "A selects Codex only plus tools and skills; other CLIs are optional. Requires confirmation.", ()),
     "legacy:install": Guide("Manage", "none", "", "Install or configure development tools.", "A component plan with dependencies and consent.", "May install packages or change configuration; review before applying.", ()),
     "legacy:upgrade": Guide("Manage", "none", "", "Update detected development tools.", "A manager-specific upgrade plan.", "External or unsupported tools may be skipped.", ()),
     "legacy:agent-install": Guide("Manage", "none", "", "Install agent extensions.", "A plan with explicit agent targets.", "Review integration targets and consent.", ()),
@@ -584,7 +585,7 @@ MODULES = {
     "Containers": ("Inspect local Docker and operate exact targets.", (("Find containers", "docker.ps"), ("Debug a service", "docker.logs"), ("Compose project", "docker.compose"))),
     "Storage": ("Inspect disk usage before safe cleanup.", (("Disk filling up", "storage.usage"), ("Large caches", "storage.cache-sizes"), ("Clean safely", "legacy:clean"))),
     "Environment": ("Inspect and manage development tools.", (("Tool inventory", "env.list"), ("Install tools", "legacy:install"), ("Update tools", "legacy:upgrade"))),
-    "Coding Agents": ("Inspect agent CLIs, integrations and skills.", (("Check integrations", "agent.integrations"), ("Agent version", "agent.version"), ("Inspect skills", "agent.skills"))),
+    "Coding Agents": ("Install agent CLIs, integrations and skills. A selects the Codex preset on the setup screen.", (("Setup AI agents", "legacy:ai-setup"), ("Check integrations", "agent.integrations"), ("Agent version", "agent.version"), ("Inspect skills", "agent.skills"))),
     "Utilities": ("Transform text and generate values locally.", (("Inspect JSON", "util.json-format"), ("Decode text", "util.base64-decode"), ("Generate ID", "util.uuid7"))),
     "Project": ("Inspect workspace or launch approved workflows.", (("Detect configuration", "project.detect"), ("Tracked changes", "project.git"))),
     "Health": ("Inspect prerequisites and diagnostic evidence.", (("Check readiness", "health.check"), ("Full Doctor", "legacy:doctor"))),

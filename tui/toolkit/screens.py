@@ -26,6 +26,7 @@ from .native import safe_text, NativeError
 from .ux import ToolkitUX, action_help, validate_form
 from .guidance import guide_for
 from .collectors import collect
+from . import agent_setup
 
 MANAGED = {
     "sys.terminate": ("Terminate process", "System", "Send SIGTERM to a verified user-owned PID.", "PID"),
@@ -38,6 +39,7 @@ MANAGED = {
 LEGACY_ENTRIES = (
     ("install", "Install tools", "Environment", "Select components and review the install plan."),
     ("upgrade", "Upgrade tools", "Environment", "Upgrade installed components through their managers."),
+    ("ai-setup", "Setup AI agents & skills", "Coding Agents", "Select agent CLIs, tools and Coding Kit skills. A selects the Codex preset."),
     ("agent-install", "Install agent extensions", "Coding Agents", "Select RTK, Skills CLI or Ponytail."),
     ("rtk-install", "Configure RTK targets", "Coding Agents", "Choose RTK agent targets independently."),
     ("ponytail-install", "Configure Ponytail targets", "Coding Agents", "Choose Ponytail agent targets independently."),
@@ -61,6 +63,10 @@ class ToolkitScreens(ToolkitUX):
         self.toolkit_workflows = {}
         self.toolkit_favorites = set(favorites())
         self.toolkit_recent = []
+        self.ai_setup_active = False
+        self.ai_setup_list = KeyboardList([], multiple=True, on_all=self.ai_setup_defaults,
+            on_enter=self.ai_setup_confirm, on_back=self.back, on_help=self._show_help,
+            on_change=self._invalidate, on_filter=self._begin_filter, get_columns=self._component_list_width)
         self.toolkit_list = KeyboardList([], on_enter=self.toolkit_open_action,
             on_back=self.back, on_help=self._show_help, on_change=self._invalidate,
             on_filter=self._begin_filter, on_favorite=self.toolkit_favorite,
@@ -117,6 +123,10 @@ class ToolkitScreens(ToolkitUX):
         self.toolkit_result.control.key_bindings = result_keys
 
     def build_toolkit_views(self):
+        self.views["toolkit_ai_setup"] = self._page("AI Agents / Setup", HSplit([
+            self._text(self.ai_setup_summary, height=3), self._divider(),
+            DynamicContainer(self.ai_setup_layout), DynamicContainer(self._filter_layout),
+        ]), "↑↓ Move   Space Toggle   a Codex preset   / Filter   Enter Review   ? Help   Esc Back")
         self.views["toolkit"] = self._page(lambda: self.toolkit_category or "Quick actions", HSplit([
             self._text(self.ux_module_intro, height=3), self._divider(), DynamicContainer(self.toolkit_layout), DynamicContainer(self._filter_layout),
         ]), "↑↓ Move   / Search   f Favorite   Enter Open   Esc Back")
@@ -142,6 +152,53 @@ class ToolkitScreens(ToolkitUX):
         self.views["toolkit_confirm"] = self._page("Confirm action", HSplit([
             self._text(self.toolkit_confirmation, height=6), self._divider(), self.toolkit_confirm.window,
         ]), "↑↓ Choose   Enter Confirm   Esc Back")
+
+    def ai_setup_summary(self):
+        return [("class:title", "  CODEX-FIRST AI SETUP\n"),
+                ("class:muted", "  Integrations and Coding Kit skills target Codex globally. Other CLIs are optional.\n"),
+                ("class:running", f"  {len(self.ai_setup_list.current_values)} selected · a restores recommended preset")]
+
+    def ai_setup_layout(self):
+        if self.columns() >= WIDE_LAYOUT_MIN:
+            return self._layout("ai-setup-wide", lambda: VSplit([
+                self.ai_setup_list.window, self._divider_v(),
+                self._text(self.ai_setup_details, width=lambda: Dimension.exact(detail_panel_width(self.columns()))),
+            ], padding=1))
+        return self.ai_setup_list.window
+
+    def ai_setup_details(self):
+        item = agent_setup.BY_KEY.get(self.ai_setup_list.current_value)
+        if not item:
+            return [("class:muted", "  No matching item.")]
+        return [("class:title", "  " + item.title + "\n\n"),
+                ("class:body", "  " + item.description + "\n\n"),
+                ("class:section", "  PRESET\n"),
+                ("class:installed" if item.default else "class:muted", "  " + ("Recommended" if item.default else "Optional") + "\n\n"),
+                ("class:warning", "  Setup may download executable packages or plugins. Enter reviews the exact plan.")]
+
+    def ai_setup_defaults(self):
+        self.ai_setup_list.current_values = list(agent_setup.DEFAULT)
+        self._notice("Codex preset selected; other CLIs excluded.")
+
+    def ai_setup_open(self):
+        self.ai_setup_active = True
+        self.ai_setup_list.entries = [Entry(item.key, item.title, item.group, agent_setup.state(item), item.description)
+                                      for item in agent_setup.ITEMS]
+        self.ai_setup_list.set_query("")
+        self.ai_setup_defaults()
+        self.filter_active = False
+        self.navigate("toolkit_ai_setup", self.ai_setup_list.window)
+
+    def ai_setup_confirm(self):
+        if self.busy or self.toolkit_running():
+            return
+        try:
+            self.toolkit_workflow = agent_setup.plan(self.ai_setup_list.current_values)
+        except ValueError as exc:
+            self._notice(str(exc), style="class:warning")
+            return
+        self.toolkit_confirm.index = 0
+        self.navigate("toolkit_confirm", self.toolkit_confirm.window)
 
     def inventory_columns(self):
         return self._component_list_width() if self.columns() >= WIDE_LAYOUT_MIN else self.columns()
@@ -264,6 +321,7 @@ class ToolkitScreens(ToolkitUX):
     def open_toolkit(self, category=None):
         if self.busy:
             return
+        self.ai_setup_active = False
         self.ux_stack.clear()
         self.ux_legacy_parent = None
         self.ux_result = None
@@ -334,7 +392,7 @@ class ToolkitScreens(ToolkitUX):
         if self.toolkit_plan is not None:
             desc = self.toolkit_plan.description
         elif self.toolkit_workflow is not None:
-            desc = "Launch: " + shlex.join(self.toolkit_workflow.command)
+            desc = self.toolkit_workflow.description if self.ai_setup_active else "Launch: " + shlex.join(self.toolkit_workflow.command)
         else:
             desc = "No action pending."
         return [("class:warning", "  EXPLICIT CONFIRMATION\n\n"), ("class:body", "  " + safe_text(desc) + "\n"),
@@ -348,6 +406,7 @@ class ToolkitScreens(ToolkitUX):
         if not key:
             return
         self.toolkit_key = key
+        self.ai_setup_active = False
         self.ux_stack.clear()
         self.ux_result = None
         self.ux_value = ""
@@ -357,19 +416,21 @@ class ToolkitScreens(ToolkitUX):
         self.toolkit_input.text = ""
         if key.startswith("legacy:"):
             action = key[7:]
-            if action != "theme":
+            if action not in ("theme", "ai-setup"):
                 self.ux_legacy_parent = "toolkit"
-            if action == "theme":
+            if action == "ai-setup":
+                self.ai_setup_open()
+            elif action == "theme":
                 self.toggle_theme()
             elif action in ("rtk-install", "ponytail-install"):
-                self.open_menu("install")
+                self.open_menu("install", scope="ai")
                 self.selector.current_values = [action.split("-")[0]]
                 self.confirm_selection()
             elif action == "agent-install":
-                self.open_menu("install")
+                self.open_menu("install", scope="ai")
                 self.selector.set_query("AI AGENT EXTENSIONS")
             else:
-                self.open_menu(action)
+                self.open_menu(action, scope="development" if action in ("install", "upgrade") else None)
             return
         if key.startswith("run:"):
             self.toolkit_workflow = self.toolkit_workflows[key[4:]]
@@ -501,7 +562,19 @@ class ToolkitScreens(ToolkitUX):
             self._invalidate()
 
     def toolkit_back(self):
-        if self.screen == "toolkit_raw":
+        if self.screen == "toolkit_ai_setup":
+            if self.filter_active:
+                self._cancel_filter()
+            elif self.ai_setup_list.query:
+                self.ai_setup_list.set_query("")
+            else:
+                self.ai_setup_active = False
+                self.navigate("toolkit", self.toolkit_list.window)
+        elif self.ai_setup_active and self.screen in ("toolkit_confirm", "toolkit_result"):
+            self.toolkit_workflow = None
+            self.toolkit_result.text = ""
+            self.navigate("toolkit_ai_setup", self.ai_setup_list.window)
+        elif self.screen == "toolkit_raw":
             self.ux_raw.text = ""
             self.navigate(self.ux_raw_parent, self._focus_for(self.ux_raw_parent))
         elif self.screen == "toolkit_row_detail":

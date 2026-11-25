@@ -142,8 +142,8 @@ class ToolkitUX:
         return category + " / " + self.ux_title() + (" / " + suffix if suffix else "")
 
     def ux_module_intro(self):
-        title = self.toolkit_category or "Quick actions"
-        intro = MODULES.get(title, ("Search the complete action catalog by goal, name or command.", ()))[0]
+        title = "AI Agents" if self.toolkit_category == "Coding Agents" else self.toolkit_category or "Quick actions"
+        intro = MODULES.get(self.toolkit_category, ("Search the complete action catalog by goal, name or command.", ()))[0]
         return [("class:title", "  " + title.upper() + "\n"),
                 ("class:body", "  " + intro + "\n"),
                 ("class:muted", "  Select an action for examples and limitations. ? Help")]
