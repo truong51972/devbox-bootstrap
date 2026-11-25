@@ -19,9 +19,10 @@ def tool_rows():
     return tuple(
         ToolRow(code, name, categories.get(code, "OTHER"),
                 "Not checked" if states[code] == "Checking" else states[code],
-                *metadata.get(code, ("", "Ownership/version not verified")),
+                *metadata.get(code, ("", "No executable detected" if states[code] == "Missing" else "Ownership/version not verified")),
                 DEPENDENCIES.get(code, ()))
-        for code, name in COMPONENTS
+        for code, name in sorted(COMPONENTS, key=lambda item: next(
+            (i for i, (_, keys) in enumerate(GROUPS) if item[0] in keys), len(GROUPS)))
     )
 
 

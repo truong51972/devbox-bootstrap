@@ -8,7 +8,7 @@ from .inventory_models import AgentRow, ToolRow, AgentMatrix
 
 SHORT_STATE = {
     "Unavailable": "N/A", "Unverified": "Unverif.",
-    "Not checked": "Unchecked", "Available": "Ready",
+    "Not checked": "Unchecked", "Available": "Avail.",
     "Installed": "Installed", "Disabled": "Disabled",
 }
 
@@ -21,7 +21,7 @@ def clip(text, width):
 
 
 def cell(state, width, active=False, *, rules=False):
-    label = "Rules" if rules and state == "Installed" else SHORT_STATE.get(state, state)
+    label = "Rules" if rules and state == "Installed" else state if len(state) <= width else SHORT_STATE.get(state, state)
     return (focused_status_style(state, active), clip(label, width).ljust(width))
 
 
@@ -47,9 +47,16 @@ class InventoryList(KeyboardList):
         self.on_change()
 
     def cursor_position(self):
-        if not self.visible:
-            return Point(x=0, y=0)
-        return Point(x=0, y=1 + min(self.index, len(self.visible) - 1))
+        row_number = 1
+        previous = None
+        for index, entry in enumerate(self.visible):
+            if self.matrix is None and entry.group != previous:
+                row_number += 1 + int(previous is not None)
+                previous = entry.group
+            if index == self.index:
+                return Point(x=0, y=row_number)
+            row_number += 1
+        return Point(x=0, y=0)
 
     def render(self):
         width = max(1, self.get_columns() - 1)
@@ -68,7 +75,13 @@ class InventoryList(KeyboardList):
             name_width = max(1, width - 2 - cell_width)
             header = "  " + clip("Tool", name_width).ljust(name_width) + clip("State", cell_width)
         out = [("class:section", header + "\n")]
+        previous = None
         for i, entry in enumerate(self.visible):
+            if not matrix and entry.group != previous:
+                if previous is not None:
+                    out.append(("", "\n"))
+                out.append(("class:section", "  " + clip(entry.group, width - 2) + "\n"))
+                previous = entry.group
             row = self.rows[entry.key]
             active = i == self.index
             style = "class:focus" if active else "class:body"
@@ -100,7 +113,8 @@ def detail_fragments(row):
         if row.dependencies:
             out += field("Requires", ", ".join(row.dependencies))
         out += [("class:section", "\n  INSTALLATION EVIDENCE\n")]
-        out += [("class:body", "  " + safe_text(row.evidence) + "\n")]
+        evidence_style = "class:warning" if "not verified" in row.evidence.lower() or "blocked" in row.evidence.lower() else "class:body"
+        out += [(evidence_style, "  " + safe_text(row.evidence) + "\n")]
         out += [("class:muted", "\n  Detection is not a runtime health check.\n")]
     else:
         out += field("CLI", row.cli, status_style(row.cli))

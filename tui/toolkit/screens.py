@@ -108,7 +108,7 @@ class ToolkitScreens:
         for key, title in (("toolkit_tools", "Development tools / Inventory"),
                            ("toolkit_matrix", "Coding agents / Integrations")):
             self.views[key] = self._page(title, HSplit([
-                self._text(self.inventory_summary, height=3), self._divider(),
+                self._text(self.inventory_summary, height=lambda: Dimension.exact(4 if self.columns() < 80 else 3)), self._divider(),
                 DynamicContainer(self.inventory_layout), DynamicContainer(self._filter_layout),
             ]), "↑↓ Move   / Filter   Enter/i Details   r Refresh   Esc Back")
         self.views["toolkit_inventory_detail"] = self._page("Inventory / Details", self.inventory_detail,
@@ -130,7 +130,10 @@ class ToolkitScreens:
             out = [("class:title", "  AGENT INTEGRATION MATRIX\n"),
                    ("class:muted", f"  {sum(row.cli == 'Available' for row in rows)}/{len(rows)} CLI available  ·  RTK binary: "),
                    (status_style(matrix.binary.state), matrix.binary.state + "\n")]
-            out += [("class:muted", "  Rules = instruction-based · N/A = unavailable · Enter for evidence")]
+            out += [("class:installed", f"  RTK: {sum(row.rtk.state == 'Installed' for row in rows)} registered"),
+                    ("class:muted", "  ·  "),
+                    ("class:installed", f"Ponytail: {sum(row.ponytail.state == 'Installed' for row in rows)} registered"),
+                    ("class:muted", "  ·  Rules = instructions")]
             return out
         out = [("class:title", "  DEVELOPMENT TOOL INVENTORY\n")]
         for state in ("Installed", "Missing", "Partial", "Unverified", "Not checked"):
@@ -325,12 +328,14 @@ class ToolkitScreens:
                 collector = environment.tool_rows if key == "env.list" else agents.agent_matrix
                 snapshot = await asyncio.to_thread(collector)
                 target = self.inventory_screen()
-                if self.screen in ("toolkit_result", target):
-                    refresh = self.screen == target
+                if self.screen in ("toolkit_result", target, "toolkit_inventory_detail"):
+                    refresh = self.screen != "toolkit_result"
                     self.inventory_list.set_snapshot(snapshot, preserve=refresh)
                     if not refresh:
                         self.filter_active = False
                         self.navigate(target, self.inventory_list.window)
+                    if self.screen == "toolkit_inventory_detail":
+                        self.inventory_detail.text = self.inventory_lexer.set_fragments(self.inventory_preview())
                     self._notice("Inventory checked. Select a row for evidence.", style="class:installed")
                 self.toolkit_recent = [key] + [x for x in self.toolkit_recent if x != key][:9]
                 return
@@ -344,7 +349,7 @@ class ToolkitScreens:
             if self.screen == "toolkit_result":
                 self.toolkit_result.text = "Action failed: " + ("Invalid input or query failed." if action and action.sensitive else safe_text(str(exc)))
                 self._notice("Action failed.", style="class:error")
-            elif self.screen in ("toolkit_tools", "toolkit_matrix"):
+            elif self.screen in ("toolkit_tools", "toolkit_matrix", "toolkit_inventory_detail"):
                 self._notice("Refresh failed; previous inventory retained: " + safe_text(str(exc)), style="class:error")
 
     def toolkit_confirm_action(self):
