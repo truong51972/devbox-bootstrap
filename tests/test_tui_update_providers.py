@@ -9,15 +9,18 @@ from tui.app import DevboxTUI
 
 
 class UpdateProviderTests(unittest.TestCase):
-    def test_manual_updates_excluded_from_bulk_selection(self):
+    def test_legacy_binary_update_includes_adoption(self):
         row = r.Resource("minikube", "Minikube", "K8S", True, "Installed", update="Available", can_adopt=True)
-        self.assertEqual(row.status, "Manual update")
-        self.assertEqual(row.action, "")
+        self.assertEqual(row.status, "Update available")
+        self.assertEqual(row.action, "Update")
         app = DevboxTUI()
         app.resource_rows = (row,)
         app.resource_render_rows()
         app.resource_updates()
-        self.assertFalse(app.resource_list.current_values)
+        self.assertEqual(app.resource_list.current_values, ["minikube"])
+        op = r.plan("development", (row,), ["minikube"])[0]
+        self.assertIn("adopt-binary.sh", op.command[-1])
+        self.assertIn("--upgrade", op.command[-1])
         app.resource_adopt()
         self.assertEqual(app.screen, "resource_confirm")
         self.assertEqual(app.resource_operations[0].verb, "Adopt")
@@ -41,7 +44,7 @@ class UpdateProviderTests(unittest.TestCase):
         with patch.object(r, "binary_version", return_value="1.35.0"), patch.object(r, "command", return_value='{"tag_name":"v1.36.0"}'):
             result = r.release_probe(row)
         self.assertEqual((result.installed_version, result.available_version), ("1.35.0", "1.36.0"))
-        self.assertEqual(result.status, "Manual update")
+        self.assertEqual(result.status, "Update blocked")
         self.assertFalse(result.can_update)
 
     def test_upstream_failure_preserves_installed_version(self):

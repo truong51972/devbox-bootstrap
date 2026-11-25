@@ -158,7 +158,7 @@ class ResourceScreens:
         for scope, key in (("development", "environment"), ("ai", "agents")):
             cached = self.resource_cache.get(scope)
             if cached:
-                count = sum(r.action == "Update" for r in cached[1])
+                count = sum(r.bulk_update for r in cached[1])
                 self.menu.entries = [replace(e, status=f"{count} updates" if count else "") if e.key == key else e
                                      for e in self.menu.entries]
 
@@ -166,9 +166,9 @@ class ResourceScreens:
         rows = self.resource_rows
         return [("class:section", "  " + self.resource_title().upper() + "\n"),
                 ("class:installed", f"  {sum(r.installation == 'Installed' for r in rows)} installed"),
-                ("class:warning", f"  {sum(r.action == 'Update' for r in rows)} updates"),
+                ("class:warning", f"  {sum(r.bulk_update for r in rows)} updates"),
                 ("class:missing", f"  {sum(r.installation == 'Missing' for r in rows)} missing\n"),
-                ("class:muted", f"  {len(self.resource_list.current_values)} selected · {sum(r.status == 'Manual update' for r in rows)} manual · {sum(r.status == 'Check failed' for r in rows)} failed · a missing / u updates")]
+                ("class:muted", f"  {len(self.resource_list.current_values)} selected · {sum(r.status == 'Update blocked' for r in rows)} blocked · {sum(r.status == 'Check failed' for r in rows)} failed · a missing / u updates")]
 
     def resource_layout(self):
         if self.columns() >= WIDE_LAYOUT_MIN:
@@ -208,12 +208,12 @@ class ResourceScreens:
         self.navigate("resource_detail", self.resource_detail)
 
     def resource_defaults(self):
-        self.resource_list.current_values = [r.key for r in self.resource_rows if r.recommended and r.action in ("Install", "Configure")]
+        self.resource_list.selected.update(r.key for r in self.resource_rows if r.recommended and r.action in ("Install", "Configure"))
         self._notice("Selected recommended missing or incomplete resources.")
 
     def resource_updates(self):
-        self.resource_list.selected.update(r.key for r in self.resource_rows if r.action == "Update")
-        self._notice("Added all verified, safely updateable resources to selection.")
+        self.resource_list.selected.update(r.key for r in self.resource_rows if r.bulk_update)
+        self._notice("Selected available updates and retryable checks. Current tools can be selected individually.")
 
     def resource_advanced(self):
         self.resource_advanced_parent = True
@@ -243,7 +243,7 @@ class ResourceScreens:
             return
         self.resource_plan_text.text = "\n".join(
             f"{op.verb.upper():10} {op.name}\n  {shlex.join(op.command)}" for op in self.resource_operations)
-        self.resource_plan_text.text += "\n\nUpdates use the original manager. Docker upgrades may restart the daemon.\nAI setup may install executable hooks; default target is global Codex.\nPonytail updates target Codex only; review /hooks after updating.\nSkill updates affect the named global skill (including agents sharing its directory)."
+        self.resource_plan_text.text += "\n\nUpdates use the original manager. Current tools can be explicitly checked. Legacy Kubernetes binaries are checksum-verified before replacement. Docker upgrades may restart the daemon.\nAI setup may install executable hooks; default target is global Codex.\nPonytail updates target Codex only; review /hooks after updating.\nSkill updates affect the named global skill (including agents sharing its directory)."
         self.resource_prepare_confirmation()
 
     def resource_confirm_action(self):

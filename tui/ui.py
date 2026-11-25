@@ -55,7 +55,7 @@ STATUS_STYLES = {
     "Installed": "class:installed",
     "Update available": "class:warning",
     "Update unknown": "class:muted",
-    "Manual update": "class:warning",
+    "Update blocked": "class:warning",
     "Check failed": "class:error",
     "Unknown": "class:muted",
     "Available": "class:installed",

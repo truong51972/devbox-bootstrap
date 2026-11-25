@@ -402,3 +402,5 @@ Resource status distinguishes `Manual update` (new release, no automatic ownersh
 
 
 Reviewed resource batches use the same fullscreen Execution, Result, and Activity history as other managed operations. Sudo authentication alone may temporarily use the terminal. Optional privileged install actions are off by default; Tab cycles review, plan and options. Mixed batches retain a single operation lock, stop on failure and record per-resource outcomes. Enter/Esc from Result returns to the originating workspace and refreshes inventory. Home also exposes Update Devbox source directly; successful self-update still exits.
+
+Installed resources with verified update providers can be selected even if current or an upstream check failed. U selects available updates and retryable checks, not current tools. Devbox resolves user-writable npm global installs (including custom/nvm prefixes), supported native agents, pipx uv and official Git-installed Cargo RTK. Legacy Kubernetes binaries are checksum-adopted during the reviewed Update plan. Unsupported or unwritable providers remain blocked; no blind replacement or package-manager switching.
