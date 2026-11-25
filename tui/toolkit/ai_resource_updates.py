@@ -120,7 +120,7 @@ def skill_update(name, entries, tree):
     current = entry["skillFolderHash"]
     latest = tree.get("skills/" + name, "")
     if not latest:
-        return Update(installed=current, reason="Upstream skill revision unavailable.")
+        return Update("Failed", installed=current, reason="Upstream skill revision unavailable; native updater can retry.", eligible=bool(shutil.which("skills")))
     return Update("Current" if current == latest else "Available", current, latest,
                   "Global Skills CLI lockfile and official Coding Kit folder revision.", bool(shutil.which("skills")))
 
@@ -179,13 +179,13 @@ def ponytail_update():
         return Update(reason="Codex Ponytail is disabled, pinned, or its official marketplace is not verified.")
     current = ponytail_installed_version()
     if not current:
-        return Update(reason="Active Codex plugin version could not be verified.")
+        return Update(reason="Active plugin version unavailable; verified marketplace updater can retry.", eligible=True)
     data = decode(run_read("curl", "-fsSL", "--max-time", "8",
                            "https://raw.githubusercontent.com/DietrichGebert/ponytail/main/.codex-plugin/plugin.json", timeout=10))
     latest = data.get("version", "")
     if (data.get("name") != "ponytail" or not isinstance(latest, str) or not SEMVER.fullmatch(latest)
             or not official_source(data.get("repository") or data.get("homepage"), PONYTAIL)):
-        return Update(installed=current, reason="Official upstream manifest unavailable.")
+        return Update("Failed", installed=current, reason="Official upstream manifest unavailable; marketplace updater can retry.", eligible=True)
     state = "Available" if tuple(map(int, SEMVER.fullmatch(latest).groups())) > tuple(map(int, SEMVER.fullmatch(current).groups())) else "Current"
     return Update(state, current, latest, "Codex user marketplace; hooks trust remains manual.", True)
 
@@ -196,7 +196,7 @@ def execute(key):
         if before.state == "Current":
             print("Ponytail is already current.")
             return
-        if before.state != "Available" or not before.eligible:
+        if not before.eligible:
             raise ValueError("Ponytail update cannot be verified; refresh inventory.")
         subprocess.run(["codex", "plugin", "marketplace", "upgrade", "ponytail"], check=True, timeout=180)
         # Recheck the official source after marketplace refresh; never remove the
@@ -214,7 +214,7 @@ def execute(key):
         if before.state == "Current":
             print(name + " is already current.")
             return
-        if before.state != "Available" or not before.eligible:
+        if not before.eligible:
             raise ValueError("Coding Kit skill source/version not verified; refresh inventory.")
         # Official CLI retains existing global placement and lockfile. Explicit
         # skill name + global scope avoids unrelated skills and project updates.

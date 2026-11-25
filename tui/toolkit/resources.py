@@ -384,7 +384,8 @@ def scan(scope, rows):
                 if row.key in ("rtk", "ponytail"):
                     statuses = tuple(f"{a.name}: {getattr(a, row.key).state} — {getattr(a, row.key).reason}" for a in matrix.agents)
                     state = getattr(codex, row.key).state if codex else "Unavailable"
-                    if row.key == "rtk" and matrix.binary.state != "Installed":
+                    if row.key == "rtk":
+                        # Binary lifecycle is independent of per-agent hook configuration.
                         state = matrix.binary.state
                     if state == "Unavailable":
                         state = "Missing" if not codex or codex.cli == "Unavailable" else "Unverified"
