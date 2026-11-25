@@ -370,7 +370,7 @@ upgrade_component() {
         docker)
             upgrade_apt docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
             if (( UPGRADE_CHANGED )); then warn 'Docker packages updated; running containers/daemon may be restarted.'; fi ;;
-        nvidia) upgrade_apt nvidia-container-toolkit ;;
+        nvidia) upgrade_apt nvidia-container-toolkit nvidia-container-toolkit-base libnvidia-container1 libnvidia-container-tools ;;
         kubectl) upgrade_kubectl ;;
         minikube) upgrade_minikube ;;
         rtk) upgrade_rtk ;;
