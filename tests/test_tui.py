@@ -69,7 +69,7 @@ class TUIBasicTests(unittest.TestCase):
 
     def test_menu_component_confirmation_and_dependencies(self):
         app = DevboxTUI()
-        self.assertEqual(app.menu.current_value, "quick")
+        self.assertEqual(app.menu.current_value, "environment")
         app.open_menu("install")
         self.assertEqual(app.screen, "select")
         app.available["docker"] = "Missing"

@@ -53,6 +53,9 @@ THEMES = {"minimal": STYLE, "mono": MONO_STYLE}
 
 STATUS_STYLES = {
     "Installed": "class:installed",
+    "Update available": "class:warning",
+    "Update unknown": "class:muted",
+    "Unknown": "class:muted",
     "Available": "class:installed",
     "Not checked": "class:warning",
     "Missing": "class:missing",
@@ -83,6 +86,8 @@ STATUS_STYLES = {
 
 def status_style(status: str) -> str:
     """Use the same semantic palette for component, run and cleaner rows."""
+    if status.endswith(" updates"):
+        return "class:warning"
     if status in STATUS_STYLES:
         return STATUS_STYLES[status]
     if status.startswith(("SAFE | ", "MANUAL | ")):
@@ -146,6 +151,7 @@ class KeyboardList:
         on_raw: Callable[[], None] | None = None,
         on_related: Callable[[], None] | None = None,
         on_edit: Callable[[], None] | None = None,
+        on_update: Callable[[], None] | None = None,
     ) -> None:
         self.entries = list(entries)
         self.multiple = multiple
@@ -233,8 +239,15 @@ class KeyboardList:
             def _edit(_event):
                 on_edit()
 
+        if on_update:
+            @kb.add("u")
+            @kb.add("U")
+            def _update(_event):
+                on_update()
+
         if on_refresh:
             @kb.add("r")
+            @kb.add("R")
             def _refresh(_event) -> None:
                 on_refresh()
 
