@@ -165,6 +165,7 @@ class ToolkitUX:
                 out += action_help(key)
         elif not application:
             topics = {
+                "home": ("Overview", "Development Tools and AI Agents share Manage. R checks Devbox source updates again; Enter opens the selected action. Source updates are fast-forward only and exit on success."),
                 "resources": ("Manage resources", "Space selects a resource; a selects recommended missing/incomplete items; u adds verified updates; n clears; r refreshes; i shows details; e opens advanced tools; Enter reviews the plan. No changes occur without explicit confirmation."),
                 "resource_confirm": ("Review changes", "Choose dry run to inspect commands or Execute to apply the exact reviewed batch."),
                 "select": ("Select components", "Space toggles an item. Review dependencies and consent before applying."),

@@ -73,6 +73,43 @@ class StartupUpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(app.screen, "home")
         self.assertIsNone(app.pending_update)
 
+    async def test_home_update_status_and_revision_details(self):
+        app = DevboxTUI()
+        app.menu.index = next(i for i, entry in enumerate(app.menu.entries) if entry.key == "update")
+        self.assertEqual(app.menu.current.status, "Not checked")
+        for state, label in (("current", "Up to date"), ("dirty", "Update blocked"),
+                             ("unsupported", "Update blocked"), ("not-fast-forward", "Update blocked"),
+                             ("unavailable", "Check failed"), ("available", "Update available")):
+            with patch("tui.app.check_update", return_value=UpdateCheck(state, "old-revision", "new-revision", 2 if state == "available" else 0)):
+                await app._check_startup_update()
+            self.assertEqual(app.menu.current.status, label)
+            detail = "".join(value for _, value in app._home_details())
+            self.assertIn(label, detail)
+            self.assertIn("old-revision", detail)
+            self.assertIn("new-revision", detail)
+            self.assertIn("UTC", detail)
+            if state == "available":
+                app._decline_update()
+                self.assertEqual(app.menu.current.status, "Update available")
+                self.assertIsNone(app.pending_update)
+        self.assertEqual(next(e.group for e in app.menu.entries if e.key == "environment"), next(e.group for e in app.menu.entries if e.key == "agents"))
+        self.assertEqual(next(e.label for e in app.menu.entries if e.key == "settings"), "Settings")
+
+    async def test_manual_refresh_ignores_disabled_startup_and_deduplicates(self):
+        app = DevboxTUI()
+        with patch.dict("os.environ", {"DEVBOX_CHECK_UPDATES": "0"}), patch("tui.app.check_update", new_callable=AsyncMock, return_value=UpdateCheck("current", "same", "same")) as check:
+            app._start_update_check()
+            self.assertIsNone(app.update_check_task)
+            app._refresh_home_update()
+            task = app.update_check_task
+            self.assertEqual(next(e.status for e in app.menu.entries if e.key == "update"), "Checking")
+            app._refresh_home_update()
+            self.assertIs(app.update_check_task, task)
+            await task
+            check.assert_awaited_once()
+            self.assertEqual(next(e.status for e in app.menu.entries if e.key == "update"), "Up to date")
+        await app.tasks.close()
+
     async def test_update_exits_only_on_success(self):
         from prompt_toolkit.application.current import create_app_session
         from prompt_toolkit.input import create_pipe_input
