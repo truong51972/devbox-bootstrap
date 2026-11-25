@@ -12,7 +12,7 @@ import re
 import shutil
 
 from . import agents, data, environment, health, network, system
-from .native import native, local_docker, bytes_label
+from .native import native, local_docker, bytes_label, NativeError
 from .results import Cell, Metric, ResourceData, Result, TextData, table, report
 
 def _json(raw):
@@ -121,7 +121,12 @@ def _system(key, value, cwd):
                 rows.append((p[0], p[1], Cell(p[2], "installed" if p[2] == "active" else "error" if p[2] == "failed" else "muted"), p[3], p[4] if len(p) > 4 else ""))
         return table(("Unit", "Load", "Active", "Substate", "Description"), rows, f"{len(rows)} loaded services", raw)
     if key == "sys.ssh-agent":
-        raw = system.ssh_agent(value, cwd)
+        try:
+            raw = system.ssh_agent(value, cwd)
+        except NativeError as exc:
+            if "The agent has no identities" in str(exc):
+                return table(("Bits", "Fingerprint", "Identity"), [], "No loaded SSH identities")
+            raise
         rows = [line.split(None, 2) for line in _lines(raw)]
         return table(("Bits", "Fingerprint", "Identity"), [r for r in rows if len(r) == 3], "Loaded SSH identities", raw)
     if key == "sys.ssh-keys":

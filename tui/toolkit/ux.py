@@ -89,6 +89,8 @@ class ToolkitUX:
             on_help=self._show_help, on_change=self._invalidate, get_columns=self.columns)
         self.ux_related_parent = "toolkit_result"
         self.ux_targets = {}
+        self.inventory_operations = False
+        self.inventory_target = None
         self.ux_stack = []
         self.ux_legacy_parent = None
         self.ux_help_focus = None
@@ -340,6 +342,7 @@ class ToolkitUX:
         if not guide or not guide.related or self.toolkit_running():
             self._notice("No related action available.")
             return
+        self.inventory_operations = False
         self.ux_related_parent = self.screen
         row = self.ux_table.row if self.screen == "toolkit_table" else None
         values = dict(zip(self.ux_table.data.columns, (c.value for c in row))) if row else {}
@@ -371,6 +374,9 @@ class ToolkitUX:
         self.navigate("toolkit_related", self.ux_related.window)
 
     def ux_run_related(self):
+        if self.inventory_operations:
+            self.inventory_apply_action()
+            return
         key = self.ux_related.current_value
         if not key:
             return

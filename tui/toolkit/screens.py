@@ -22,7 +22,7 @@ from .registry import ACTIONS, BY_ID, execute
 from .operations import prepare, apply
 from .settings import favorites, toggle_favorite
 from .workflows import list_workflows
-from .native import safe_text
+from .native import safe_text, NativeError
 from .ux import ToolkitUX, action_help, validate_form
 from .guidance import guide_for
 from .collectors import collect
@@ -68,7 +68,7 @@ class ToolkitScreens(ToolkitUX):
         self.inventory_list = InventoryList([], on_enter=self.inventory_show_detail,
             on_back=self.back, on_help=self._show_help, on_change=self._invalidate,
             on_filter=self._begin_filter, on_refresh=self.inventory_refresh,
-            on_details=self.inventory_show_detail, on_quit=self.quit,
+            on_details=self.inventory_show_detail, on_quit=self.quit, on_related=self.inventory_actions,
             get_columns=self.inventory_columns)
         self.inventory_lexer = FragmentLexer()
         self.inventory_detail = TextArea(lexer=self.inventory_lexer, read_only=True,
@@ -136,7 +136,7 @@ class ToolkitScreens(ToolkitUX):
             self.views[key] = self._page(title, HSplit([
                 self._text(self.inventory_summary, height=lambda: Dimension.exact(4 if self.columns() < 80 else 3)), self._divider(),
                 DynamicContainer(self.inventory_layout), DynamicContainer(self._filter_layout),
-            ]), "↑↓ Move   / Filter   Enter/i Details   r Refresh   Esc Back")
+            ]), "↑↓ Move   / Filter   Enter/i Details   a Actions   r Refresh   Esc Back")
         self.views["toolkit_inventory_detail"] = self._page("Inventory / Details", self.inventory_detail,
             "↑↓ Scroll   Esc Back")
         self.views["toolkit_confirm"] = self._page("Confirm action", HSplit([
@@ -185,6 +185,41 @@ class ToolkitScreens(ToolkitUX):
             return
         self.inventory_detail.text = self.inventory_lexer.set_fragments(self.inventory_preview())
         self.navigate("toolkit_inventory_detail", self.inventory_detail)
+
+    def inventory_actions(self):
+        row = self.inventory_list.rows.get(self.inventory_list.current_value)
+        if row is None or self.toolkit_running():
+            return
+        if self.inventory_list.matrix is not None:
+            if row.cli == "Unavailable":
+                self._notice("Agent CLI unavailable. Install it before configuring integrations.")
+                return
+            choices = [Entry("rtk", "Configure RTK for " + row.name), Entry("ponytail", "Configure Ponytail for " + row.name)]
+        else:
+            choices = [Entry("install", "Install / configure " + row.name)]
+            if row.state == "Installed" and row.key != "ponytail" and "blocked" not in row.evidence.lower():
+                choices.append(Entry("upgrade", "Review upgrade for " + row.name))
+        self.ux_related_parent = self.screen
+        self.inventory_target = row
+        self.inventory_operations = True
+        self.ux_related.entries = choices
+        self.ux_related.set_query("")
+        self.navigate("toolkit_related", self.ux_related.window)
+
+    def inventory_apply_action(self):
+        key = self.ux_related.current_value
+        row = self.inventory_target
+        if not key:
+            return
+        self.inventory_operations = False
+        self.ux_legacy_parent = self.ux_related_parent
+        is_agent = self.inventory_list.matrix is not None
+        self.open_menu("install" if is_agent else key)
+        self.selector.current_values = [key if is_agent else row.key]
+        self.confirm_selection()
+        if is_agent and "agent_" + row.key in {e.key for e in self.options.entries}:
+            self.options.current_values = ["agent_" + row.key]
+            self._refresh_confirm_plan()
 
     def inventory_refresh(self):
         if self.toolkit_running() or self.busy:
@@ -384,7 +419,7 @@ class ToolkitScreens(ToolkitUX):
             else:
                 result = await asyncio.to_thread(execute, key, value, self.toolkit_cwd)
                 if self.screen == "toolkit_input" and self.ux_editor:
-                    self.ux_editor_output.text = result
+                    self.ux_editor_output.text = safe_text(result)
                     self.ux_phase = "Completed"
                     self._notice("Completed locally. Content is not persisted.", style="class:installed")
                 elif self.screen == "toolkit_result":
@@ -395,14 +430,22 @@ class ToolkitScreens(ToolkitUX):
         except Exception as exc:
             action = BY_ID.get(key)
             self.ux_phase = "Failed"
-            message = "Invalid input or query failed. Check the example and input format." if action and action.sensitive else safe_text(str(exc))
+            if isinstance(exc, NativeError):
+                heading, suggestion = {
+                    "missing_dependency": ("REQUIRED TOOL UNAVAILABLE", "Install the required tool or choose another action."),
+                    "timeout": ("QUERY TIMED OUT", "Check the target or service, then retry."),
+                    "native_failure": ("NATIVE COMMAND FAILED", "Check permissions, service state and the action help."),
+                }.get(exc.code, ("ACTION FAILED", "Review the action help and retry."))
+            else:
+                heading, suggestion = ("ACTION FAILED", "Edit the input, retry, or open contextual help.")
+            message = "Check the input format or target. Sensitive details are hidden." if action and action.sensitive else safe_text(str(exc))
             if self.screen == "toolkit_input" and self.ux_editor:
                 self.ux_editor_output.text = "Invalid input. Check the format and example."
                 self._notice("Action failed. Edit the input and retry.", style="class:error")
             elif self.screen == "toolkit_result":
                 self.toolkit_result.text = self.ux_result_lexer.set_fragments([
-                    ("class:error", "  ACTION FAILED\n\n"), ("class:body", "  " + message + "\n\n"),
-                    ("class:section", "  NEXT STEPS\n"), ("class:muted", "  Edit the input, retry, or open contextual help.")])
+                    ("class:error", "  " + heading + "\n\n"), ("class:body", "  " + message + "\n\n"),
+                    ("class:section", "  NEXT STEPS\n"), ("class:muted", "  " + suggestion)])
                 self._notice("Action failed.", style="class:error")
             elif self.screen == "toolkit_table":
                 self._notice("Refresh failed; previous result retained: " + message, style="class:error")
@@ -459,6 +502,7 @@ class ToolkitScreens(ToolkitUX):
             self.ux_detail.text = ""
             self.navigate(self.ux_detail_parent, self._focus_for(self.ux_detail_parent))
         elif self.screen == "toolkit_related":
+            self.inventory_operations = False
             self.navigate(self.ux_related_parent, self._focus_for(self.ux_related_parent))
         elif self.screen == "toolkit_table" and self.filter_active:
             self._cancel_filter()
